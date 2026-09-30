@@ -1,5 +1,6 @@
 import { DIALOGUES, dialogueForDay } from "@/lib/content";
-import { createClient, today } from "@/lib/supabase";
+import { sql, today } from "@/lib/db";
+import { requireOwner } from "@/lib/session";
 import { Conversation } from "./Conversation";
 
 export default async function TalkPage({ searchParams }: PageProps<"/talk">) {
@@ -8,17 +9,14 @@ export default async function TalkPage({ searchParams }: PageProps<"/talk">) {
   const dialogue = DIALOGUES.find((x) => x.id === d) ?? dialogueForDay(day);
   const next = DIALOGUES[(DIALOGUES.indexOf(dialogue) + 1) % DIALOGUES.length];
 
-  const supabase = await createClient();
-  const { data: done } = await supabase
-    .from("practice_sessions")
-    .select("exercises(result)")
-    .eq("day", day)
-    .eq("source", "app")
-    .eq("topic", dialogue.title)
-    .not("completed_at", "is", null)
-    .order("started_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  const userId = await requireOwner();
+  const [done] = await sql<{ correct: number; total: number }>(
+    `select count(e.id) filter (where e.result = 'correct')::int as correct, count(e.id)::int as total
+     from practice_sessions s left join exercises e on e.session_id = s.id
+     where s.user_id = $1 and s.day = $2 and s.source = 'app' and s.topic = $3 and s.completed_at is not null
+     group by s.id order by s.started_at desc limit 1`,
+    [userId, day, dialogue.title],
+  );
 
   return (
     <>
@@ -26,7 +24,7 @@ export default async function TalkPage({ searchParams }: PageProps<"/talk">) {
         <h1 className="text-2xl font-bold">{dialogue.title}</h1>
         <p className="muted text-sm">
           {done
-            ? `✓ תורגלה היום (${done.exercises.filter((e) => e.result === "correct").length}/${done.exercises.length})`
+            ? `✓ תורגלה היום (${done.correct}/${done.total})`
             : "בחרו את התשובה הטבעית לכל משפט"}
         </p>
       </div>

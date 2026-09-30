@@ -1,19 +1,21 @@
-import { createClient } from "@/lib/supabase";
-import { checkedByWord } from "@/lib/stats";
+import { sql } from "@/lib/db";
+import { requireOwner } from "@/lib/session";
 import { Deck } from "./Deck";
 
 export default async function CardsPage() {
-  const supabase = await createClient();
-  const [{ data: words }, { data: exercises }] = await Promise.all([
-    supabase
-      .from("words")
-      .select("id, english, hebrew, example")
-      .lte("due_at", new Date().toISOString())
-      .order("due_at")
-      .limit(20),
-    supabase.from("exercises").select("word_id, result").not("word_id", "is", null),
-  ]);
-  const checked = checkedByWord(exercises ?? []);
+  const userId = await requireOwner();
+  const words = await sql<{ id: string; english: string; hebrew: string; example: string | null; correct: number; attempts: number }>(
+    `select w.id, w.english, w.hebrew, w.example,
+            count(e.id) filter (where e.result = 'correct')::int as correct, count(e.id)::int as attempts
+     from words w left join exercises e on e.word_id = w.id
+     where w.user_id = $1 and w.due_at <= now()
+     group by w.id order by w.due_at limit 20`,
+    [userId],
+  );
 
-  return <Deck words={(words ?? []).map((w) => ({ ...w, checked: checked.get(w.id) }))} />;
+  return (
+    <Deck
+      words={words.map(({ correct, attempts, ...w }) => ({ ...w, checked: attempts ? { correct, attempts } : undefined }))}
+    />
+  );
 }

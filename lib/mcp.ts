@@ -1,7 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
-import { checkedByWord } from "@/lib/stats";
-import { createTokenClient, today } from "@/lib/supabase";
+import { sql, today } from "@/lib/db";
 
 const INSTRUCTIONS = `Practice data for one Hebrew-speaking learner of English (very basic level).
 
@@ -45,16 +44,9 @@ const WRITE = { readOnlyHint: false, destructiveHint: false, idempotentHint: tru
 
 const json = (data: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] });
 
-// Throws on a DB error so the SDK returns it to the assistant as a tool error.
-async function run<T>(query: PromiseLike<{ data: T; error: { message: string } | null }>) {
-  const { data, error } = await query;
-  if (error) throw new Error(error.message);
-  return data as NonNullable<T>;
-}
-
-// One server per request, bound to the caller's OAuth token: every query runs under RLS as that user.
-export function buildServer(token: string) {
-  const db = createTokenClient(token);
+// One server per request, bound to the owner behind the verified OAuth token.
+// Every query is scoped to that user id; DB errors surface to the assistant as tool errors.
+export function buildServer(userId: string) {
   const server = new McpServer({ name: "gad-english", version: "1.0.0" }, { instructions: INSTRUCTIONS });
 
   server.registerTool(
@@ -66,42 +58,41 @@ export function buildServer(token: string) {
       annotations: READ,
     },
     async ({ due_limit }) => {
-      const now = new Date().toISOString();
-      const count = () => db.from("words").select("*", { count: "exact", head: true });
-      const [total, known, practice, due, dueWords, exercises, sessions] = await Promise.all([
-        count(),
-        count().eq("status", "known"),
-        count().eq("status", "practice"),
-        count().lte("due_at", now),
-        run(db.from("words").select("id, english, hebrew, example, box, due_at").lte("due_at", now).order("due_at").limit(due_limit)),
-        run(db.from("exercises").select("word_id, result")),
-        run(
-          db
-            .from("practice_sessions")
-            .select("id, day, source, topic, level, mode, completed_at, comprehension, vocabulary, grammar, pronunciation, exercises(result)")
-            .order("started_at", { ascending: false })
-            .limit(5),
+      const [[words], [checked], dueWords, recent] = await Promise.all([
+        sql(
+          `select count(*)::int as total,
+                  count(*) filter (where status = 'known')::int as self_marked_known,
+                  count(*) filter (where status = 'practice')::int as self_marked_practice,
+                  count(*) filter (where due_at <= now())::int as due_now
+           from words where user_id = $1`,
+          [userId],
+        ),
+        sql(
+          `select count(*) filter (where result = 'correct')::int as correct,
+                  count(*) filter (where result = 'partial')::int as partial,
+                  count(*) filter (where result = 'incorrect')::int as incorrect,
+                  count(*)::int as attempts
+           from exercises where user_id = $1`,
+          [userId],
+        ),
+        sql(
+          `select w.english, w.hebrew, w.example, w.box as familiarity,
+                  json_build_object('correct', count(e.id) filter (where e.result = 'correct'), 'attempts', count(e.id)) as checked
+           from words w left join exercises e on e.word_id = w.id
+           where w.user_id = $1 and w.due_at <= now()
+           group by w.id order by w.due_at limit $2`,
+          [userId, due_limit],
+        ),
+        sql(
+          `select s.id, s.day, s.source, s.topic, s.level, s.mode, s.completed_at,
+                  s.comprehension, s.vocabulary, s.grammar, s.pronunciation,
+                  json_build_object('correct', count(e.id) filter (where e.result = 'correct'), 'total', count(e.id)) as exercises
+           from practice_sessions s left join exercises e on e.session_id = s.id
+           where s.user_id = $1 group by s.id order by s.started_at desc limit 5`,
+          [userId],
         ),
       ]);
-      const byWord = checkedByWord(exercises);
-      const tally = (r: string) => exercises.filter((e) => e.result === r).length;
-
-      return json({
-        today: today(),
-        words: { total: total.count, self_marked_known: known.count, self_marked_practice: practice.count, due_now: due.count },
-        checked_answers: { correct: tally("correct"), partial: tally("partial"), incorrect: tally("incorrect"), attempts: exercises.length },
-        due_words: dueWords.map((w) => ({
-          english: w.english,
-          hebrew: w.hebrew,
-          example: w.example,
-          familiarity: w.box,
-          checked: byWord.get(w.id) ?? { correct: 0, attempts: 0 },
-        })),
-        recent_practice: sessions.map(({ exercises: ex, ...s }) => ({
-          ...s,
-          exercises: { correct: ex.filter((e) => e.result === "correct").length, total: ex.length },
-        })),
-      });
+      return json({ today: today(), words, checked_answers: checked, due_words: dueWords, recent_practice: recent });
     },
   );
 
@@ -119,7 +110,7 @@ export function buildServer(token: string) {
       annotations: WRITE,
     },
     async ({ request_id, topic, level, mode }) => {
-      const id = await run(db.rpc("start_practice", { p_request_id: request_id, p_topic: topic, p_level: level, p_mode: mode }));
+      const [{ id }] = await sql<{ id: string }>("select start_practice($1, $2, $3, $4, $5) as id", [userId, request_id, topic, level, mode]);
       return json({ practice_id: id });
     },
   );
@@ -151,22 +142,25 @@ export function buildServer(token: string) {
     },
     async (a) => {
       if (a.scores.pronunciation != null) {
-        const s = await run(db.from("practice_sessions").select("mode").eq("id", a.practice_id).single());
-        if (s.mode !== "voice") throw new Error("pronunciation can only be scored in a voice session (start_practice mode: voice)");
+        const [s] = await sql<{ mode: string }>("select mode from practice_sessions where id = $1 and user_id = $2", [a.practice_id, userId]);
+        if (s?.mode !== "voice") throw new Error("pronunciation can only be scored in a voice session (start_practice mode: voice)");
       }
-      await run(
-        db.rpc("finish_practice", {
-          p_session_id: a.practice_id,
-          p_sentences: a.sentences,
-          p_corrections: a.corrections,
-          p_new_words: a.new_words,
-          p_comprehension: a.scores.comprehension,
-          p_vocabulary: a.scores.vocabulary,
-          p_grammar: a.scores.grammar,
-          p_pronunciation: a.scores.pronunciation,
-          p_feedback: a.feedback,
-          p_exercises: a.exercises,
-        }),
+      await sql(
+        `select finish_practice(p_user_id => $1, p_session_id => $2, p_sentences => $3, p_corrections => $4, p_new_words => $5,
+           p_comprehension => $6, p_vocabulary => $7, p_grammar => $8, p_pronunciation => $9, p_feedback => $10, p_exercises => $11)`,
+        [
+          userId,
+          a.practice_id,
+          JSON.stringify(a.sentences),
+          JSON.stringify(a.corrections),
+          JSON.stringify(a.new_words),
+          a.scores.comprehension,
+          a.scores.vocabulary,
+          a.scores.grammar,
+          a.scores.pronunciation ?? null,
+          a.feedback,
+          JSON.stringify(a.exercises),
+        ],
       );
       return json({
         practice_id: a.practice_id,
@@ -187,20 +181,18 @@ export function buildServer(token: string) {
     async ({ practice_id, exercises }) => {
       const ids: string[] = [];
       for (const e of exercises) {
-        ids.push(
-          await run(
-            db.rpc("record_exercise", {
-              p_request_id: e.request_id,
-              p_question: e.question,
-              p_answer: e.answer,
-              p_result: e.result,
-              p_expected: e.expected,
-              p_attempt: e.attempt,
-              p_session_id: practice_id,
-              p_word: e.word,
-            }),
-          ),
-        );
+        const [{ id }] = await sql<{ id: string }>("select record_exercise($1, $2, $3, $4, $5, $6, $7, $8, $9) as id", [
+          userId,
+          e.request_id,
+          e.question,
+          e.answer,
+          e.result,
+          e.expected ?? null,
+          e.attempt ?? null,
+          practice_id ?? null,
+          e.word ?? null,
+        ]);
+        ids.push(id);
       }
       return json({ exercise_ids: ids, verify_with: "get_exercises" });
     },
@@ -215,11 +207,18 @@ export function buildServer(token: string) {
       annotations: WRITE,
     },
     async ({ words }) => {
-      const english = words.map((w) => w.english);
-      const existing = new Set((await run(db.from("words").select("english").in("english", english))).map((w) => w.english));
-      await run(db.from("words").upsert(words, { onConflict: "user_id,english", ignoreDuplicates: true }));
-      const rows = await run(db.from("words").select("id, english, hebrew, box").in("english", english));
-      return json({ words: rows.map((w) => ({ ...w, familiarity: w.box, box: undefined, already_existed: existing.has(w.english) })) });
+      const added = await sql<{ english: string }>(
+        `insert into words (user_id, english, hebrew, example)
+         select $1, w.english, w.hebrew, w.example from jsonb_to_recordset($2) as w(english text, hebrew text, example text)
+         on conflict (user_id, english) do nothing returning english`,
+        [userId, JSON.stringify(words)],
+      );
+      const isNew = new Set(added.map((w) => w.english));
+      const rows = await sql<{ id: string; english: string; hebrew: string; familiarity: number }>(
+        "select id, english, hebrew, box as familiarity from words where user_id = $1 and english = any($2)",
+        [userId, words.map((w) => w.english)],
+      );
+      return json({ words: rows.map((w) => ({ ...w, already_existed: !isNew.has(w.english) })) });
     },
   );
 
@@ -232,9 +231,10 @@ export function buildServer(token: string) {
       annotations: WRITE,
     },
     async ({ word, familiarity }) => {
-      const id = await run(db.rpc("set_word_familiarity", { p_word: word, p_level: familiarity }));
-      const w = await run(db.from("words").select("id, english, box, due_at").eq("id", id).single());
-      return json({ word_id: w.id, english: w.english, familiarity: w.box, next_review: w.due_at });
+      // Separate statement: a query can't see its own function's UPDATE in the same snapshot.
+      const [{ id }] = await sql<{ id: string }>("select set_word_familiarity($1, $2, $3) as id", [userId, word, familiarity]);
+      const [w] = await sql("select id as word_id, english, box as familiarity, due_at as next_review from words where id = $1", [id]);
+      return json(w);
     },
   );
 
@@ -247,8 +247,10 @@ export function buildServer(token: string) {
       annotations: READ,
     },
     async ({ practice_id }) => {
-      const s = await run(db.from("practice_sessions").select("*, exercises(*)").eq("id", practice_id).single());
-      return json(s);
+      const [session] = await sql("select * from practice_sessions where id = $1 and user_id = $2", [practice_id, userId]);
+      if (!session) throw new Error("practice session not found");
+      const exercises = await sql("select * from exercises where session_id = $1 and user_id = $2 order by created_at", [practice_id, userId]);
+      return json({ ...session, exercises });
     },
   );
 
@@ -260,7 +262,8 @@ export function buildServer(token: string) {
       inputSchema: z.object({ exercise_ids: z.array(z.uuid()).min(1).max(100) }),
       annotations: READ,
     },
-    async ({ exercise_ids }) => json(await run(db.from("exercises").select("*").in("id", exercise_ids))),
+    async ({ exercise_ids }) =>
+      json(await sql("select * from exercises where user_id = $1 and id = any($2::uuid[]) order by created_at", [userId, exercise_ids])),
   );
 
   return server;

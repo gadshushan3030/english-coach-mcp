@@ -1,14 +1,31 @@
 "use client";
 
-import { useActionState } from "react";
-import { login } from "@/app/actions";
+import { useState } from "react";
+import { authClient } from "@/lib/auth-client";
 
-export function LoginForm({ next }: { next: string }) {
-  const [error, action, pending] = useActionState(login, null);
+export function LoginForm() {
+  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
 
   return (
-    <form action={action} className="surface flex flex-col gap-4 p-5">
-      <input type="hidden" name="next" value={next} />
+    <form
+      className="surface flex flex-col gap-4 p-5"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        setPending(true);
+        const form = new FormData(e.currentTarget);
+        const { data, error } = await authClient.signIn.email({
+          email: String(form.get("email")),
+          password: String(form.get("password")),
+        });
+        if (error) {
+          setPending(false);
+          return setError("האימייל או הסיסמה שגויים");
+        }
+        // During an assistant OAuth flow the server answers with the next step (consent page).
+        window.location.href = (data as { url?: string }).url ?? "/";
+      }}
+    >
       <label className="flex flex-col gap-1.5">
         <span className="text-sm font-medium">אימייל</span>
         <input name="email" type="email" dir="ltr" autoComplete="username" required className="input" />

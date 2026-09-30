@@ -1,141 +1,135 @@
 # Gad English
 
 אפליקציה אישית לתרגול אנגלית: כרטיסיות אנגלית–עברית, רשימת מילים, חזרות מרווחות, שיחה יומית בסיסית, דשבורד התקדמות, ושרת MCP שדרכו עוזר חיצוני (למשל ChatGPT) קורא התקדמות ושומר תרגולים.
-Next.js 16 + TypeScript, Supabase (Auth + Postgres), פריסה ב־Vercel. ממשק בעברית (RTL), מותאם למק ולאייפון.
+Next.js 16 + TypeScript, Postgres (Neon בענן), Better Auth, פריסה ב־Vercel. ממשק בעברית (RTL), מותאם למק ולאייפון.
 
 ## איך זה עובד
 
-- **כניסה** – אימייל + סיסמה דרך Supabase Auth. הרשמה חדשה חסומה, והאפליקציה מכניסה רק את `ALLOWED_EMAIL`. בדיקת הסשן וההפניה ל־`/login` נעשות ב־`proxy.ts`.
-- **הרשאות** – RLS על כל הטבלאות: כל שורה שייכת ל־`user_id = auth.uid()`. המפתח היחיד שהאפליקציה מכירה הוא ה־publishable key; אין בה service/secret key בכלל.
-- **כרטיסיות** (`/cards`) – עד 20 מילים שהגיע זמנן. ״יודע״ מעלה את המילה קופסה ודוחה אותה ל־1/3/7/14/30/60 ימים; ״צריך לתרגל״ מחזיר אותה לקופסה 0 ולחזרה מיידית. כל סימון נרשם בטבלת `reviews` (הפונקציה `review_word` ב־SQL עושה את שני הדברים בטרנזקציה אחת).
-- **מילים** (`/words`) – הוספה ומחיקה של מילים משלך, או 40 מילים בסיסיות בלחיצה אחת מדף הבית.
-- **שיחה יומית** (`/talk`) – דיאלוג קצר אחד ליום (מתוך 10, לפי תאריך בשעון ישראל) עם בחירת תשובה, תרגום והשמעה. נשמר כשיחת תרגול רגילה (`source = 'app'`), כל משפט כתרגיל שנבדק.
-- **התקדמות** (`/progress`) – כל השיחות (מהאפליקציה ומהעוזר) עם ניקוד, תרגילים מחוץ לשיחה, ורשימת העוזרים המחוברים עם כפתור ניתוק. `/progress/[id]` מציג שיחה אחת: משפטים, תיקונים, מילים חדשות, משוב ותרגילים.
-- **השמעה** – דרך `speechSynthesis` של הדפדפן, בלי API חיצוני.
+- **כניסה** – אימייל + סיסמה דרך Better Auth. אין הרשמה: את המשתמש יוצרים עם `npm run create-owner`. בנוסף, hook ב־`lib/auth.ts` חוסם יצירת סשן לכל מי שאינו `ALLOWED_EMAIL`.
+- **גישה לנתונים** – רק קוד השרת מדבר עם Postgres (ה־connection string קיים רק ב־Vercel), וכל שאילתה ופונקציה מסוננת לפי ה־user id של הבעלים. אין API ציבורי למסד.
+- **כרטיסיות** (`/cards`) – ״יודע״ מעלה את המילה קופסה ודוחה אותה ל־1/3/7/14/30/60 ימים; ״צריך לתרגל״ מחזיר לקופסה 0. הסימון נשמר ב־`reviews` (סימון עצמי). בכרטיס מוצג גם ״נבדק: x/y נכונות״ מתוך תשובות שנבדקו בפועל.
+- **מילים** (`/words`) – הוספה ומחיקה, או 40 מילים בסיסיות בלחיצה מדף הבית.
+- **שיחה יומית** (`/talk`) – דיאלוג קצר אחד ליום (לפי שעון ישראל), נשמר כשיחת תרגול (`source = 'app'`) עם כל משפט כתרגיל שנבדק.
+- **התקדמות** (`/progress`) – כל השיחות (מהאפליקציה ומהעוזר) עם ניקוד, תרגילים מחוץ לשיחה, ועוזרים מחוברים עם ניתוק. `/progress/[id]` מציג שיחה אחת במלואה.
+- **השמעה** – `speechSynthesis` של הדפדפן.
 
 ### מה נשמר
 
 | טבלה | מה יש בה |
 |---|---|
 | `words` | מילה, תרגום, דוגמה, `status` (סימון עצמי), `box` = רמת היכרות 0–6 שקובעת את מועד החזרה |
-| `reviews` | **סימון עצמי** מהכרטיסיות (״יודע״ / ״צריך לתרגל״). לא נחשב תשובה שנבדקה |
+| `reviews` | **סימון עצמי** מהכרטיסיות. לא נחשב תשובה שנבדקה |
 | `practice_sessions` | שיחה: מזהה, תאריך, נושא, רמה (A0–C2), טקסט/קול, משפטים, תיקונים, מילים חדשות, ניקוד 1–5 (הבנת השאלה, שימוש במילים, דקדוק, הגייה – רק בקול), משוב |
-| `exercises` | **תשובה שנבדקה בפועל**: שאלה, תשובה, תשובה צפויה, תוצאה (`correct` / `partial` / `incorrect`), מספר ניסיון, מי בדק |
+| `exercises` | **תשובה שנבדקה בפועל**: שאלה, תשובה, תשובה צפויה, תוצאה, מספר ניסיון, מי בדק |
 
-כל כתיבה מקבלת `request_id`, ויש עליו `unique (user_id, request_id)`. שליחה חוזרת של אותה בקשה מחזירה את השורה הקיימת ולא יוצרת כפילות, וגם לא מזיזה שוב את לוח החזרות של המילה.
+כל כתיבה מקבלת `request_id` עם `unique (user_id, request_id)`: שליחה חוזרת מחזירה את השורה הקיימת, בלי כפילות ובלי להזיז שוב את לוח החזרות.
 
 ```
-supabase/migrations/   סכמה, RLS ופונקציות ה־SQL (review_word, start_practice, finish_practice, record_exercise, set_word_familiarity)
-proxy.ts               רענון סשן + חסימת כל מי שאינו ALLOWED_EMAIL (לא חל על /mcp ו־/.well-known)
-app/mcp/route.ts       שרת ה־MCP: אימות OAuth ואז הכלים מ־lib/mcp.ts
-app/oauth/consent/     מסך האישור שאליו Supabase שולח כשעוזר מבקש להתחבר
-lib/supabase.ts        Supabase client לצד השרת
-lib/content.ts         מילים בסיסיות ודיאלוגים
-app/actions.ts         כל ה־Server Actions
-app/(main)/            הדפים אחרי כניסה
+db/migrations/        0001: טבלאות Better Auth (נוצר ב-npx auth generate), 0002: טבלאות ופונקציות האפליקציה
+scripts/              migrate.mts (מריץ migrations), create-owner.mts (יוצר את המשתמש היחיד)
+lib/auth.ts           Better Auth: אימייל+סיסמה, נעילת בעלים, שרת OAuth 2.1 ל-MCP (mcp plugin)
+lib/mcp.ts            כלי ה-MCP
+app/mcp/route.ts      שרת ה-MCP: אימות token + בדיקה שהחיבור לא נותק
+app/oauth/consent/    מסך אישור עוזר
+proxy.ts              הפניה ל-/login בלי cookie של סשן
 ```
 
 ## הרצה מקומית
 
-דרוש: Node 20+, Docker, Supabase CLI.
+דרוש: Node 22+, Docker.
 
 ```bash
 npm install
 ```
 
 ```bash
-supabase start
+npm run db:up
 ```
-
-> הפורטים המקומיים הוזזו ל־553xx (API על `55321`, Studio על `55323`) כדי לא להתנגש בפרויקט Supabase מקומי אחר. realtime, storage, edge functions ו־analytics כבויים מקומית כי האפליקציה לא משתמשת בהם.
 
 ```bash
 cp .env.example .env.local
 ```
 
-מלאו ב־`.env.local` את `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` מתוך `supabase status`, ואת `ALLOWED_EMAIL`.
+ב־`.env.local`: למלא `BETTER_AUTH_SECRET` (פלט של `openssl rand -hex 32`) ואת `ALLOWED_EMAIL`.
 
-יצירת המשתמש המקומי: Studio ב־http://127.0.0.1:55323 ← Authentication ← Add user ← Create new user (לסמן Auto Confirm).
+```bash
+npm run db:migrate
+```
+
+```bash
+npm run create-owner
+```
+
+(שואל סיסמה בלי להציג אותה.)
 
 ```bash
 npm run dev
 ```
 
-האפליקציה על http://localhost:3000.
-
 ## פריסה
 
-### 1. Supabase
+### 1. מסד נתונים (Neon דרך Vercel)
 
-1. יוצרים פרויקט חדש ב־[supabase.com](https://supabase.com/dashboard).
-2. מחילים את המיגרציות:
+בפרויקט ב־Vercel: **Storage ← Create Database ← Neon** (Free), ולחבר לפרויקט. זה מוסיף את `DATABASE_URL` ל־Environment Variables.
 
-```bash
-supabase link --project-ref <project-ref>
-```
-
-```bash
-supabase db push
-```
-
-3. **Authentication ← Sign In / Providers**: מכבים את **Allow new users to sign up**. זה מה שמונע ממישהו אחר לפתוח חשבון.
-4. **Authentication ← Users ← Add user ← Create new user**: האימייל והסיסמה שלך, עם Auto Confirm.
-5. **Project Settings ← API Keys**: מעתיקים את ה־Project URL ואת ה־publishable key.
-
-> לא להריץ `supabase config push` – זה ידחוף את `site_url` המקומי מ־`supabase/config.toml` לפרויקט האמיתי.
-
-### 2. Vercel
-
-מייבאים את ה־repo ב־[vercel.com/new](https://vercel.com/new) (או `vercel` מהטרמינל) ומגדירים Environment Variables:
+### 2. משתני סביבה ב־Vercel
 
 | משתנה | ערך |
 |---|---|
-| `NEXT_PUBLIC_SUPABASE_URL` | ה־Project URL |
-| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | ה־publishable key |
+| `DATABASE_URL` | נוסף אוטומטית ע״י Neon |
+| `BETTER_AUTH_SECRET` | `openssl rand -hex 32` |
+| `BETTER_AUTH_URL` | כתובת הפרודקשן, למשל `https://gad-english.vercel.app` |
 | `ALLOWED_EMAIL` | האימייל שלך |
 
-אחרי הפריסה: ב־Supabase ← Authentication ← URL Configuration, להגדיר את **Site URL** לכתובת של Vercel.
+### 3. סכמה ומשתמש ב־Neon
 
-### 3. חיבור עוזר דרך MCP
+```bash
+vercel env pull .env.production.local --environment=production
+```
 
-השרת נמצא ב־`https://<your-app>.vercel.app/mcp` (Streamable HTTP). הוא מקבל רק access token ששרת ה־OAuth של Supabase הנפיק (יש בו `client_id`), של `ALLOWED_EMAIL`, ושהחיבור שלו לא נותק. סשן רגיל של האתר לא מספיק.
+```bash
+node --env-file=.env.production.local scripts/migrate.mts
+```
 
-**פעם אחת ב־Supabase:**
+```bash
+node --env-file=.env.production.local scripts/create-owner.mts
+```
 
-1. **Authentication ← OAuth Server**: להפעיל, **Authorization Path** = `/oauth/consent`, ולהפעיל **Dynamic Client Registration** (ChatGPT רושם את עצמו לבד).
-2. לוודא ש־**Site URL** (שלב 2 למעלה) הוא כתובת ה־Vercel – ממנו Supabase בונה את כתובת מסך האישור.
+```bash
+rm .env.production.local
+```
 
-**ב־ChatGPT** ([הוראות](https://developers.openai.com/plugins/quickstart)):
+### 4. פריסה
 
-1. Settings ← Security and login ← להפעיל Developer mode.
-2. להוסיף MCP server עם הכתובת `https://<your-app>.vercel.app/mcp`.
-3. ChatGPT יפנה לכניסה לאתר ולמסך ״חיבור עוזר לחשבון״. לבדוק ששם האפליקציה וכתובת החזרה נראים נכונים, ולאשר.
+Push ל־`main` (אם GitHub מחובר ל־Vercel) או `vercel --prod`.
 
-ניתוק: `/progress` ← ״עוזרים מחוברים״ ← ניתוק. הגישה נחסמת מיד, גם ל־token שעוד לא פג.
+### 5. חיבור ChatGPT דרך MCP
 
-**הכלים:**
+1. ChatGPT ← Settings ← Security and login ← **Developer mode**.
+2. [chatgpt.com/plugins](https://chatgpt.com/plugins) ← **+** ← הכתובת `https://<your-app>.vercel.app/mcp` ← OAuth.
+3. נפתחת כניסה לאתר ואז מסך ״חיבור עוזר לחשבון״. לבדוק ששם האפליקציה וכתובת החזרה (`https://chatgpt.com/...`) נכונים, ולאשר.
+4. [personal plugins](https://chatgpt.com/plugins?view=personal) ← **+**. בשיחה: לשונית **Work**, `@` ובחירת ה־plugin.
+
+ChatGPT נרשם לבד (Dynamic Client Registration), עם PKCE. ה־token שהוא מקבל מכוון ל־`<BETTER_AUTH_URL>/mcp` בלבד (`aud`), ו־`/mcp` בודק בכל בקשה שהחיבור עדיין מאושר.
+ניתוק: `/progress` ← ״עוזרים מחוברים״ ← ניתוק. מוחק את הלקוח, את האישור ואת כל ה־refresh tokens; גם token שעוד לא פג נדחה מיד.
 
 | כלי | מה עושה |
 |---|---|
 | `get_progress` | ספירות, סימון עצמי מול תשובות שנבדקו, מילים לחזרה, 5 שיחות אחרונות |
 | `start_practice` | פותח שיחה ומחזיר `practice_id` |
-| `save_practice_results` | שומר משפטים, תיקונים, מילים חדשות (נכנסות גם לחפיסה), ניקוד, משוב ותרגילים |
-| `record_exercises` | תרגילים מחוץ לשיחה (למשל בוחן מילים); מחזיר `exercise_ids` |
+| `save_practice_results` | משפטים, תיקונים, מילים חדשות (נכנסות גם לחפיסה), ניקוד, משוב ותרגילים |
+| `record_exercises` | תרגילים מחוץ לשיחה; מחזיר `exercise_ids` |
 | `add_words` | מוסיף מילים; קיימות לא משתנות |
 | `set_word_familiarity` | רמת היכרות 0–6 וקביעת החזרה הבאה |
-| `get_practice` / `get_exercises` | קריאה חוזרת לפי מזהה, כדי לוודא שנשמר |
+| `get_practice` / `get_exercises` | קריאה חוזרת לפי מזהה, לאימות השמירה |
 
-### 4. התקנה כאפליקציה
+### 6. התקנה כאפליקציה
 
 - **אייפון**: Safari ← שיתוף ← הוספה למסך הבית.
 - **מק**: Safari ← File ← Add to Dock.
 
 ## סודות
 
-- `.env*` ב־`.gitignore`; רק `.env.example` (בלי ערכים אמיתיים) נכנס לגיט.
-- ה־publishable key מיועד להיות חשוף – ההגנה על הנתונים היא RLS.
-- ה־secret / service_role key לא נדרש לאפליקציה ואסור לשים אותו ב־Vercel, בקוד או בצ׳אט. גם ה־MCP עובד עם ה־token של המשתמש, כך ש־RLS חל על כל קריאה.
-
-## בדיקת זרימת OAuth מקומית
-
-`supabase/config.toml` מפעיל מקומית את שרת ה־OAuth עם רישום דינמי ו־`site_url = http://localhost:3000`. אחרי שינוי בו: `supabase stop` ואז `supabase start`.
+- `.env*` ב־`.gitignore`; רק `.env.example` בלי ערכים נכנס לגיט.
+- `DATABASE_URL` ו־`BETTER_AUTH_SECRET` הם סודות: רק ב־Vercel וב־`.env.local` המקומי, אף פעם לא בקוד, בדפדפן או בצ׳אט.
+- העוזר לא מקבל שום מפתח: רק access token קצר מועד (שעה) ו־refresh token, שניהם אחרי אישור שלך.

@@ -1,20 +1,28 @@
 import Link from "next/link";
 import { addStarterWords } from "@/app/actions";
 import { dialogueForDay } from "@/lib/content";
-import { createClient, today } from "@/lib/supabase";
+import { sql, today } from "@/lib/db";
+import { requireOwner } from "@/lib/session";
 
 export default async function Home() {
-  const supabase = await createClient();
+  const userId = await requireOwner();
   const day = today();
-  const words = () => supabase.from("words").select("*", { count: "exact", head: true });
-  const [{ count: total }, { count: known }, { count: due }, { data: talks }] = await Promise.all([
-    words(),
-    words().eq("status", "known"),
-    words().lte("due_at", new Date().toISOString()),
-    supabase.from("practice_sessions").select("topic").eq("day", day).eq("source", "app").not("completed_at", "is", null),
-  ]);
   const dialogue = dialogueForDay(day);
-  const talkedToday = talks?.some((t) => t.topic === dialogue.title);
+  const [[{ total, known, due }], [talk]] = await Promise.all([
+    sql<{ total: number; known: number; due: number }>(
+      `select count(*)::int as total,
+              count(*) filter (where status = 'known')::int as known,
+              count(*) filter (where due_at <= now())::int as due
+       from words where user_id = $1`,
+      [userId],
+    ),
+    sql(
+      `select 1 from practice_sessions
+       where user_id = $1 and day = $2 and source = 'app' and topic = $3 and completed_at is not null limit 1`,
+      [userId, day, dialogue.title],
+    ),
+  ]);
+  const talkedToday = !!talk;
 
   if (!total) {
     return (
@@ -35,8 +43,8 @@ export default async function Home() {
     <>
       <h1 className="text-2xl font-bold">היום</h1>
       <div className="grid grid-cols-3 gap-3">
-        <Stat label="לחזרה עכשיו" value={due ?? 0} />
-        <Stat label="ידועות" value={known ?? 0} />
+        <Stat label="לחזרה עכשיו" value={due} />
+        <Stat label="ידועות" value={known} />
         <Stat label="סה״כ מילים" value={total} />
       </div>
       <Link href="/cards" className="surface flex items-center justify-between p-5">

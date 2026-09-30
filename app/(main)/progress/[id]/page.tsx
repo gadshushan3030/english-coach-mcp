@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { createClient } from "@/lib/supabase";
-import { correctOf, fmtDay, fmtTime, ResultBadge, SCORE_LABELS, SOURCE } from "../ui";
+import { sql } from "@/lib/db";
+import { requireOwner } from "@/lib/session";
+import { correctOf, fmtDay, fmtTime, ResultBadge, SCORE_LABELS, SOURCE, type Scores } from "../ui";
 
 type Sentence = { en: string; he?: string };
 type Correction = { original: string; corrected: string; note?: string };
@@ -9,18 +10,24 @@ type NewWord = { english: string; hebrew: string; example?: string };
 
 export default async function PracticePage({ params }: PageProps<"/progress/[id]">) {
   const { id } = await params;
-  const supabase = await createClient();
-  const { data: s } = await supabase
-    .from("practice_sessions")
-    .select("*, exercises(id, question, answer, expected, result, attempt, checked_by, created_at, words(english))")
-    .eq("id", id)
-    .maybeSingle();
+  const userId = await requireOwner();
+  if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
+  const [[s], exercises] = await Promise.all([
+    sql<Scores & {
+      id: string; day: string; level: string; source: string; mode: string; topic: string; feedback: string | null;
+      completed_at: Date | null; sentences: Sentence[]; corrections: Correction[]; new_words: NewWord[];
+    }>("select * from practice_sessions where id = $1 and user_id = $2", [id, userId]),
+    sql<{ id: string; question: string; answer: string; expected: string | null; result: string; attempt: number; checked_by: string; english: string | null }>(
+      `select e.id, e.question, e.answer, e.expected, e.result, e.attempt, e.checked_by, w.english
+       from exercises e left join words w on w.id = e.word_id
+       where e.session_id = $1 and e.user_id = $2 order by e.created_at`,
+      [id, userId],
+    ),
+  ]);
   if (!s) notFound();
 
-  const sentences = s.sentences as Sentence[];
-  const corrections = s.corrections as Correction[];
-  const newWords = s.new_words as NewWord[];
-  const exercises = [...s.exercises].sort((a, b) => a.created_at.localeCompare(b.created_at));
+  const { sentences, corrections, new_words: newWords } = s;
+  const correct = exercises.filter((e) => e.result === "correct").length;
   const scores = (Object.keys(SCORE_LABELS) as (keyof typeof SCORE_LABELS)[]).filter((k) => s[k] != null);
 
   return (
@@ -81,7 +88,7 @@ export default async function PracticePage({ params }: PageProps<"/progress/[id]
         ))}
       </Block>
 
-      <Block title={`תרגילים${exercises.length ? ` · ${correctOf(exercises)}` : ""}`} empty={!exercises.length}>
+      <Block title={`תרגילים${exercises.length ? ` · ${correctOf(correct, exercises.length)}` : ""}`} empty={!exercises.length}>
         {exercises.map((e) => (
           <li key={e.id} className="flex items-start gap-3 px-4 py-3 text-sm">
             <div className="min-w-0 flex-1">
@@ -90,7 +97,7 @@ export default async function PracticePage({ params }: PageProps<"/progress/[id]
               {e.expected && <div dir="auto" className="muted">צפוי: {e.expected}</div>}
               <div className="muted text-xs">
                 ניסיון {e.attempt} · נבדק ע״י {SOURCE[e.checked_by as keyof typeof SOURCE]}
-                {e.words && ` · ${e.words.english}`}
+                {e.english && ` · ${e.english}`}
               </div>
             </div>
             <ResultBadge result={e.result} />

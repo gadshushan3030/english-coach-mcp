@@ -1,36 +1,39 @@
-import { createMcpHandler, type AuthInfo } from "@modelcontextprotocol/server";
+import { requireMcpAuth } from "@better-auth/mcp";
+import { createMcpHandler } from "@modelcontextprotocol/server";
+import { auth, isAllowedEmail, MCP_RESOURCE } from "@/lib/auth";
+import { sql } from "@/lib/db";
 import { buildServer } from "@/lib/mcp";
-import { createTokenClient, isAllowedEmail } from "@/lib/supabase";
 
-const handler = createMcpHandler(({ authInfo }) => buildServer(authInfo!.token));
+const handler = createMcpHandler(({ authInfo }) => buildServer(String(authInfo?.extra?.userId)));
 
-// Accepts only access tokens minted by the Supabase OAuth server (they carry client_id)
-// for the owner's account. A regular website session token is rejected.
-async function authenticate(token: string): Promise<AuthInfo | null> {
-  const { data, error } = await createTokenClient(token).auth.getClaims(token);
-  const claims = data?.claims;
-  const clientId = claims?.client_id;
-  if (error || !claims || typeof clientId !== "string" || !isAllowedEmail(claims.email)) return null;
-  // A revoked connection deletes its session; reject its still-unexpired tokens right away.
-  const { data: active } = await createTokenClient(token).rpc("session_is_active");
-  if (!active) return null;
-  return { token, clientId, scopes: String(claims.scope ?? "").split(" ").filter(Boolean), expiresAt: claims.exp };
-}
-
-async function handle(request: Request) {
-  const token = request.headers.get("authorization")?.match(/^Bearer\s+(.+)$/i)?.[1];
-  const auth = token ? await authenticate(token).catch(() => null) : null; // malformed JWTs throw
-  if (!auth) {
-    const metadata = `${new URL(request.url).origin}/.well-known/oauth-protected-resource/mcp`;
-    return Response.json(
-      { error: token ? "invalid_token" : "unauthorized" },
-      {
-        status: 401,
-        headers: { "WWW-Authenticate": `Bearer resource_metadata="${metadata}"${token ? ', error="invalid_token"' : ""}` },
-      },
+// requireMcpAuth verifies the JWT (signature via JWKS, issuer, audience = MCP_RESOURCE, expiry)
+// and answers 401 + WWW-Authenticate otherwise. On top of that the token's client must still
+// hold the owner's consent – disconnecting in /progress deletes it and cuts access at once.
+const protectedHandler = requireMcpAuth(
+  auth,
+  async (request, claims) => {
+    const clientId = String(claims.azp ?? claims.client_id ?? "");
+    const [owner] = await sql<{ email: string }>(
+      `select u.email from "oauthConsent" c join "user" u on u.id = c."userId"
+       where c."userId" = $1 and c."clientId" = $2`,
+      [claims.sub, clientId],
     );
-  }
-  return handler.fetch(request, { authInfo: auth });
-}
+    if (!owner || !isAllowedEmail(owner.email)) {
+      return Response.json({ jsonrpc: "2.0", error: { code: -32000, message: "connection revoked" }, id: null }, {
+        status: 401,
+        headers: { "WWW-Authenticate": `Bearer resource_metadata="${new URL(request.url).origin}/.well-known/oauth-protected-resource/mcp", error="invalid_token"` },
+      });
+    }
+    return handler.fetch(request, {
+      authInfo: {
+        token: "",
+        clientId,
+        scopes: String(claims.scope ?? "").split(" ").filter(Boolean),
+        extra: { userId: claims.sub },
+      },
+    });
+  },
+  { resource: MCP_RESOURCE },
+);
 
-export { handle as GET, handle as POST, handle as DELETE };
+export { protectedHandler as GET, protectedHandler as POST, protectedHandler as DELETE };

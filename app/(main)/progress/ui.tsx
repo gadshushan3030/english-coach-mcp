@@ -28,13 +28,11 @@ export function ScoreLine({ scores }: { scores: Scores }) {
   return parts.length ? <span>{parts.join(" · ")}</span> : null;
 }
 
-export function correctOf(exercises: { result: string }[]) {
-  return `${exercises.filter((e) => e.result === "correct").length}/${exercises.length} נכונות`;
-}
+export const correctOf = (correct: number, total: number) => `${correct}/${total} נכונות`;
 
 export const fmtDay = (day: string) => new Date(day).toLocaleDateString("he-IL", { timeZone: "UTC" });
 
-export const fmtTime = (ts: string) =>
+export const fmtTime = (ts: string | Date) =>
   new Date(ts).toLocaleString("he-IL", { timeZone: "Asia/Jerusalem", dateStyle: "short", timeStyle: "short" });
 
 export const SOURCE = { assistant: "עוזר", app: "אפליקציה" } as const;

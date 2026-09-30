@@ -1,6 +1,6 @@
 import { deleteWord } from "@/app/actions";
-import { createClient } from "@/lib/supabase";
-import { checkedByWord } from "@/lib/stats";
+import { sql } from "@/lib/db";
+import { requireOwner } from "@/lib/session";
 import { AddWordForm } from "./AddWordForm";
 
 const STATUS = {
@@ -10,19 +10,22 @@ const STATUS = {
 } as const;
 
 export default async function WordsPage() {
-  const supabase = await createClient();
-  const [{ data: words }, { data: exercises }] = await Promise.all([
-    supabase.from("words").select("id, english, hebrew, example, status").order("created_at", { ascending: false }).order("english"),
-    supabase.from("exercises").select("word_id, result").not("word_id", "is", null),
-  ]);
-  const checked = checkedByWord(exercises ?? []);
+  const userId = await requireOwner();
+  const words = await sql<{ id: string; english: string; hebrew: string; example: string | null; status: string; correct: number; attempts: number }>(
+    `select w.id, w.english, w.hebrew, w.example, w.status,
+            count(e.id) filter (where e.result = 'correct')::int as correct, count(e.id)::int as attempts
+     from words w left join exercises e on e.word_id = w.id
+     where w.user_id = $1
+     group by w.id order by w.created_at desc, w.english`,
+    [userId],
+  );
 
   return (
     <>
       <h1 className="text-2xl font-bold">המילים שלי</h1>
       <AddWordForm />
       <ul className="surface divide-y divide-[var(--border)]">
-        {(words ?? []).map((w) => {
+        {words.map((w) => {
           const s = STATUS[w.status as keyof typeof STATUS];
           return (
             <li key={w.id} className="flex items-center gap-3 px-4 py-3">
@@ -35,9 +38,9 @@ export default async function WordsPage() {
               </div>
               <div className="flex flex-col items-end text-xs">
                 <span className="font-medium" style={{ color: s.color }} title="סימון עצמי">{s.label}</span>
-                {checked.has(w.id) && (
+                {w.attempts > 0 && (
                   <span className="muted" title="תשובות שנבדקו בפועל">
-                    ✓ {checked.get(w.id)!.correct}/{checked.get(w.id)!.attempts}
+                    ✓ {w.correct}/{w.attempts}
                   </span>
                 )}
               </div>
@@ -47,7 +50,7 @@ export default async function WordsPage() {
             </li>
           );
         })}
-        {!words?.length && <li className="muted p-4 text-center">אין עדיין מילים</li>}
+        {!words.length && <li className="muted p-4 text-center">אין עדיין מילים</li>}
       </ul>
     </>
   );

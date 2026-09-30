@@ -4,9 +4,8 @@ import Link from "next/link";
 import { useState, useTransition } from "react";
 import { reviewWord } from "@/app/actions";
 import { Speak } from "@/components/Speak";
-import type { Checked } from "@/lib/stats";
 
-type Word = { id: string; english: string; hebrew: string; example: string | null; checked?: Checked };
+type Word = { id: string; english: string; hebrew: string; example: string | null; checked?: { correct: number; attempts: number } };
 
 export function Deck({ words }: { words: Word[] }) {
   const [i, setI] = useState(0);
