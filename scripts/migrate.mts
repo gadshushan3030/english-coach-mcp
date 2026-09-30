@@ -1,9 +1,10 @@
 // Applies db/migrations/*.sql in name order, each once, each in a transaction.
-// Usage: npm run db:migrate   (uses DATABASE_URL)
+// Usage: npm run db:migrate. Also runs on every Vercel build (vercel-build), where the
+// Neon variables exist; the direct (unpooled) connection is preferred for DDL.
 import { readdir, readFile } from "node:fs/promises";
 import pg from "pg";
 
-const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
+const client = new pg.Client({ connectionString: process.env.DATABASE_URL_UNPOOLED || process.env.DATABASE_URL });
 await client.connect();
 await client.query("create table if not exists schema_migrations (name text primary key, applied_at timestamptz not null default now())");
 const done = new Set((await client.query("select name from schema_migrations")).rows.map((r) => r.name));
