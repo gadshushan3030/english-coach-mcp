@@ -6,6 +6,8 @@ A personal English-learning app (Hebrew UI) that an AI assistant can use as its 
 
 Live: [english-coach-mcp.vercel.app](https://english-coach-mcp.vercel.app) (single-owner deployment – the login is mine). Multi-user sibling project: [PaceBeep](https://github.com/gadshushan3030/pacebeep).
 
+Want the same auth + MCP setup for your own app? It's extracted as a clean template: **[MCP OAuth Starter](https://github.com/gadshushan3030/mcp-oauth-starter)**.
+
 ## What it does
 
 - **Flashcards** (English → Hebrew) with spaced repetition: "I know" moves a word up a box (review in 1/3/7/14/30/60 days), "Need practice" resets it.
@@ -13,16 +15,13 @@ Live: [english-coach-mcp.vercel.app](https://english-coach-mcp.vercel.app) (sing
 - **Assistant practice over MCP**: ChatGPT opens a session, talks with me, then stores the sentences practiced, corrections, new words, a fixed 1–5 rubric (comprehension, vocabulary, grammar, pronunciation only for voice) and every exercise it checked.
 - **Progress dashboard**: every session and exercise, self-assessment vs. checked answers side by side, connected assistants with a disconnect button.
 
+![The practice loop: read progress, open a session, converse, save results, see them, review](docs/practice-loop.svg)
+
+![Spaced repetition: seven boxes from due now to 60 days](docs/spaced-repetition.svg)
+
 ## Architecture
 
-```
-iPhone / Mac (Safari) ──► Next.js 16 on Vercel
-                           ├─ pages + Server Actions ──────────────► Postgres (Neon)
-                           ├─ /api/auth/*    Better Auth: login, owner lock, OAuth 2.1 server
-                           ├─ /.well-known/* discovery (RFC 8414 / RFC 9728)
-                           └─ /mcp           MCP server ─► token check + live consent check ─► same DB
-ChatGPT ── dynamic client registration + PKCE ──► /api/auth/oauth2/* ──► /oauth/consent (owner approves)
-```
+![Architecture: the owner on iPhone or Mac and ChatGPT, two doors into one Next.js app over Postgres](docs/architecture.svg)
 
 ## Design decisions worth reading
 
@@ -32,6 +31,10 @@ ChatGPT ── dynamic client registration + PKCE ──► /api/auth/oauth2/* �
 - **Idempotent writes.** Every MCP write takes a `request_id` with `unique (user_id, request_id)`; replays return the original row and don't move the spaced-repetition schedule twice. Batched exercises use `clock_timestamp()` so they keep their order.
 - **Evidence kept apart.** Self-assessment ("I know it") lives in `reviews`; answers the assistant actually checked live in `exercises` (question, answer, result, attempt). The dashboard shows both, so "I know it" can be compared with reality.
 - **No secrets in the repo.** Vercel env vars are Sensitive (not even `vercel env pull` can read them), so migrations run inside the Vercel build.
+
+### How ChatGPT connects
+
+![Sequence: discover, register, authorize with PKCE, token, tool calls](docs/oauth-flow.svg)
 
 ### How it got here
 
