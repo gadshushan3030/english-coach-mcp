@@ -1,5 +1,5 @@
 {
-  "name": "gad-english",
+  "name": "english-coach-mcp",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "db:up": "docker start gad-english-db 2>/dev/null || docker run -d --name gad-english-db -p 55432:5432 -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=gad_english -v gad-english-db:/var/lib/postgresql/data postgres:17-alpine",
+    "db:up": "docker start english-coach-db 2>/dev/null || docker run -d --name english-coach-db -p 55432:5432 -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=english_coach -v english-coach-db:/var/lib/postgresql/data postgres:17-alpine",
     "db:migrate": "node --env-file-if-exists=.env.local scripts/migrate.mts",
     "create-owner": "node --env-file-if-exists=.env.local scripts/create-owner.mts",
     "vercel-build": "node scripts/migrate.mts && next build"

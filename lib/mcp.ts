@@ -47,7 +47,7 @@ const json = (data: unknown) => ({ content: [{ type: "text" as const, text: JSON
 // One server per request, bound to the owner behind the verified OAuth token.
 // Every query is scoped to that user id; DB errors surface to the assistant as tool errors.
 export function buildServer(userId: string) {
-  const server = new McpServer({ name: "gad-english", version: "1.0.0" }, { instructions: INSTRUCTIONS });
+  const server = new McpServer({ name: "english-coach", version: "1.0.0" }, { instructions: INSTRUCTIONS });
 
   server.registerTool(
     "get_progress",
