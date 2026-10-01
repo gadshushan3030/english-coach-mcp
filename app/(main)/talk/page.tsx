@@ -19,16 +19,6 @@ export default async function TalkPage({ searchParams }: PageProps<"/talk">) {
   );
 
   return (
-    <>
-      <div>
-        <h1 className="text-2xl font-bold">{dialogue.title}</h1>
-        <p className="muted text-sm">
-          {done
-            ? `✓ תורגלה היום (${done.correct}/${done.total})`
-            : "בחרו את התשובה הטבעית לכל משפט"}
-        </p>
-      </div>
-      <Conversation key={dialogue.id} dialogue={dialogue} nextId={next.id} shift={Number(day.replaceAll("-", ""))} />
-    </>
+    <Conversation key={dialogue.id} dialogue={dialogue} nextId={next.id} shift={Number(day.replaceAll("-", ""))} doneToday={done ?? null} />
   );
 }

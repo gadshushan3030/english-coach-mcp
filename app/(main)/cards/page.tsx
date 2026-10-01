@@ -4,8 +4,8 @@ import { Deck } from "./Deck";
 
 export default async function CardsPage() {
   const userId = await requireOwner();
-  const words = await sql<{ id: string; english: string; hebrew: string; example: string | null; correct: number; attempts: number }>(
-    `select w.id, w.english, w.hebrew, w.example,
+  const words = await sql<{ id: string; english: string; hebrew: string; example: string | null; box: number; correct: number; attempts: number }>(
+    `select w.id, w.english, w.hebrew, w.example, w.box,
             count(e.id) filter (where e.result = 'correct')::int as correct, count(e.id)::int as attempts
      from words w left join exercises e on e.word_id = w.id
      where w.user_id = $1 and w.due_at <= now()
