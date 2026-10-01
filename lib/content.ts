@@ -44,6 +44,9 @@ export const STARTER_WORDS: { english: string; hebrew: string; example: string }
   { english: "to understand", hebrew: "להבין", example: "I don't understand." },
 ];
 
+// Days until the next review per box 0–6; mirrors box_interval() in db/migrations/0002_app.sql.
+export const BOX_DAYS = [0, 1, 3, 7, 14, 30, 60] as const;
+
 export type Turn = {
   they: string; // what the other person says (English)
   theyHe: string; // Hebrew translation

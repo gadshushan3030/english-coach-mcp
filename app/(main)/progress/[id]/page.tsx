@@ -1,8 +1,9 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
+import { Icon } from "@/components/Icon";
+import { TopBar } from "@/components/TopBar";
 import { sql } from "@/lib/db";
 import { requireOwner } from "@/lib/session";
-import { correctOf, fmtDay, fmtTime, ResultBadge, SCORE_LABELS, SOURCE, type Scores } from "../ui";
+import { correctOf, fmtDay, fmtTime, Meter, ResultBadge, SCORE_LABELS, SOURCE, type Scores } from "../ui";
 
 type Sentence = { en: string; he?: string };
 type Correction = { original: string; corrected: string; note?: string };
@@ -30,89 +31,131 @@ export default async function PracticePage({ params }: PageProps<"/progress/[id]
   const correct = exercises.filter((e) => e.result === "correct").length;
   const scores = (Object.keys(SCORE_LABELS) as (keyof typeof SCORE_LABELS)[]).filter((k) => s[k] != null);
 
+  const fromCoach = s.source === "assistant";
+
   return (
     <>
-      <div className="flex flex-col gap-1">
-        <Link href="/progress" className="muted text-sm">→ כל השיחות</Link>
-        <h1 className="text-2xl font-bold">{s.topic}</h1>
-        <p className="muted text-sm">
-          {fmtDay(s.day)} · רמה {s.level} · {SOURCE[s.source as keyof typeof SOURCE]} · {s.mode === "voice" ? "קולי" : "טקסט"}
-          {s.completed_at ? ` · נשמרה ${fmtTime(s.completed_at)}` : " · פתוחה"}
-        </p>
-        <p dir="ltr" className="muted text-end text-xs">id: {s.id}</p>
-      </div>
+      <TopBar title="פרטי שיחה" back="/progress" backLabel="חזרה להתקדמות" />
 
-      {(scores.length > 0 || s.feedback) && (
-        <section className="surface flex flex-col gap-3 p-4">
-          {scores.length > 0 && (
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-              {scores.map((k) => (
-                <div key={k} className="flex flex-col">
-                  <span className="text-xl font-bold">{s[k]}/5</span>
-                  <span className="muted text-xs">{SCORE_LABELS[k]}</span>
-                </div>
-              ))}
-            </div>
+      <header className="flex flex-col gap-2">
+        <span className="flex flex-wrap items-center gap-1.5 text-[12.5px]">
+          {fromCoach ? (
+            <span className="chip bg-ink text-[12.5px] text-surface">
+              <Icon name="spark" size={13} strokeWidth={2} />
+              המאמן ב־ChatGPT
+            </span>
+          ) : (
+            <span className="chip border border-line bg-surface text-[12.5px]">אפליקציה</span>
           )}
-          {s.feedback && <p dir="auto">{s.feedback}</p>}
+          <span className="chip border border-line bg-surface text-[12.5px]">{s.mode === "voice" ? "קולי" : "טקסט"}</span>
+          <span className="chip border border-line bg-surface font-mono text-[12.5px]">{s.level}</span>
+          {!s.completed_at && <span className="chip bg-warn-soft text-[12.5px] text-warn">פתוחה</span>}
+        </span>
+        <h1 className="text-[28px] font-bold">{s.topic}</h1>
+        <p className="muted text-[13px]">{s.completed_at ? fmtTime(s.completed_at) : fmtDay(s.day)}</p>
+      </header>
+
+      {scores.length > 0 && (
+        <section aria-label="ניקוד" className="grid grid-cols-2 gap-2.5">
+          {scores.map((k) => (
+            <div key={k} className="surface flex flex-col gap-2 rounded-2xl px-3.5 py-3">
+              <span className="muted text-[13px]">{SCORE_LABELS[k]}</span>
+              <span dir="ltr" className="flex items-baseline gap-0.5 self-start">
+                <span className="text-[28px] font-semibold tabular-nums">{s[k]}</span>
+                <span className="muted text-[13px]">/5</span>
+              </span>
+              <Meter value={s[k]!} thin />
+            </div>
+          ))}
         </section>
       )}
 
-      <Block title="משפטים שתרגלנו" empty={!sentences.length}>
-        {sentences.map((x, i) => (
-          <li key={i} className="px-4 py-2.5">
-            <div dir="ltr" lang="en" className="text-start">{x.en}</div>
-            {x.he && <div className="muted text-sm">{x.he}</div>}
-          </li>
-        ))}
-      </Block>
+      {s.feedback && (
+        <section className="flex flex-col gap-1.5 rounded-2xl bg-accent-soft px-4 py-3.5">
+          <span className="text-[12.5px] font-semibold text-accent">{fromCoach ? "משוב מהמאמן" : "משוב"}</span>
+          <p dir="auto" className="text-[15px] leading-relaxed">{s.feedback}</p>
+        </section>
+      )}
 
-      <Block title="תיקונים" empty={!corrections.length}>
-        {corrections.map((c, i) => (
-          <li key={i} className="px-4 py-2.5 text-sm">
-            <div dir="ltr" lang="en" className="text-start">
-              <span className="text-[var(--bad)] line-through">{c.original}</span> → <span className="text-[var(--good)]">{c.corrected}</span>
+      {corrections.length > 0 && (
+        <Block title="תיקונים">
+          {corrections.map((c, i) => (
+            <div key={i} className="surface flex flex-col gap-1.5 rounded-2xl px-3.5 py-3">
+              <span className="text-xs font-semibold text-warn">אמרת</span>
+              <span dir="ltr" lang="en" className="muted text-start text-base line-through decoration-warn">{c.original}</span>
+              <span className="text-xs font-semibold text-accent">נכון יותר</span>
+              <span dir="ltr" lang="en" className="text-start text-base font-medium">{c.corrected}</span>
+              {c.note && <span dir="auto" className="muted text-[13px]">{c.note}</span>}
             </div>
-            {c.note && <div dir="auto" className="muted">{c.note}</div>}
-          </li>
-        ))}
-      </Block>
+          ))}
+        </Block>
+      )}
 
-      <Block title="מילים חדשות" empty={!newWords.length}>
-        {newWords.map((w, i) => (
-          <li key={i} className="flex flex-wrap items-baseline gap-x-3 px-4 py-2.5">
-            <span dir="ltr" lang="en" className="font-semibold">{w.english}</span>
-            <span>{w.hebrew}</span>
-            {w.example && <span dir="ltr" lang="en" className="muted text-sm">{w.example}</span>}
-          </li>
-        ))}
-      </Block>
+      {newWords.length > 0 && (
+        <Block title="מילים חדשות" note={fromCoach ? "נוספו לכרטיסיות" : undefined}>
+          <div className="flex flex-wrap gap-2">
+            {newWords.map((w, i) => (
+              <span key={i} title={w.example} className="surface inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm">
+                <span dir="ltr" lang="en" className="font-semibold">{w.english}</span>
+                <span className="muted">{w.hebrew}</span>
+              </span>
+            ))}
+          </div>
+        </Block>
+      )}
 
-      <Block title={`תרגילים${exercises.length ? ` · ${correctOf(correct, exercises.length)}` : ""}`} empty={!exercises.length}>
-        {exercises.map((e) => (
-          <li key={e.id} className="flex items-start gap-3 px-4 py-3 text-sm">
-            <div className="min-w-0 flex-1">
-              <div dir="auto" className="font-medium">{e.question}</div>
-              <div dir="auto" className="muted">תשובה: {e.answer || "—"}</div>
-              {e.expected && <div dir="auto" className="muted">צפוי: {e.expected}</div>}
-              <div className="muted text-xs">
-                ניסיון {e.attempt} · נבדק ע״י {SOURCE[e.checked_by as keyof typeof SOURCE]}
-                {e.english && ` · ${e.english}`}
-              </div>
-            </div>
-            <ResultBadge result={e.result} />
-          </li>
-        ))}
-      </Block>
+      {sentences.length > 0 && (
+        <Block title="משפטים שתרגלנו">
+          <ul className="surface divide-y divide-line overflow-hidden rounded-2xl">
+            {sentences.map((x, i) => (
+              <li key={i} className="px-3.5 py-2.5">
+                <div dir="ltr" lang="en" className="text-start">{x.en}</div>
+                {x.he && <div className="muted text-sm">{x.he}</div>}
+              </li>
+            ))}
+          </ul>
+        </Block>
+      )}
+
+      {exercises.length > 0 && (
+        <Block title="תרגילים שנבדקו" note={correctOf(correct, exercises.length)}>
+          <ul className="surface divide-y divide-line overflow-hidden rounded-2xl">
+            {exercises.map((e) => (
+              <li key={e.id} className="flex items-start gap-2.5 px-3.5 py-3 text-[13px]">
+                <div className="min-w-0 flex-1">
+                  <div dir="auto" className="text-sm font-medium">{e.question}</div>
+                  <div className="muted">
+                    תשובה: <span dir="auto">{e.answer || "—"}</span>
+                    {e.expected && <> · צפוי: <span dir="auto">{e.expected}</span></>} · ניסיון {e.attempt}
+                  </div>
+                  <div className="muted text-xs">
+                    נבדק ע״י {SOURCE[e.checked_by as keyof typeof SOURCE]}
+                    {e.english && <> · <span dir="ltr" lang="en">{e.english}</span></>}
+                  </div>
+                </div>
+                <ResultBadge result={e.result} />
+              </li>
+            ))}
+          </ul>
+        </Block>
+      )}
+
+      <p className="muted text-center text-xs">
+        {fromCoach ? "נשמר על ידי ChatGPT דרך MCP" : "נשמר מהאפליקציה"}
+        <span dir="ltr" className="mt-1 block font-mono">id: {s.id}</span>
+      </p>
     </>
   );
 }
 
-function Block({ title, empty, children }: { title: string; empty: boolean; children: React.ReactNode }) {
+function Block({ title, note, children }: { title: string; note?: string; children: React.ReactNode }) {
   return (
     <section className="flex flex-col gap-2">
-      <h2 className="text-lg font-semibold">{title}</h2>
-      <ul className="surface divide-y divide-[var(--border)]">{empty ? <li className="muted p-4 text-center">אין</li> : children}</ul>
+      <div className="flex items-baseline justify-between">
+        <h2 className="font-semibold">{title}</h2>
+        {note && <span className="text-[12.5px] text-accent">{note}</span>}
+      </div>
+      {children}
     </section>
   );
 }

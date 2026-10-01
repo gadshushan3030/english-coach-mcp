@@ -1,4 +1,5 @@
 import { deleteWord } from "@/app/actions";
+import { Icon } from "@/components/Icon";
 import { sql } from "@/lib/db";
 import { requireOwner } from "@/lib/session";
 import { AddWordForm } from "./AddWordForm";
@@ -22,9 +23,9 @@ export default async function WordsPage() {
 
   return (
     <>
-      <h1 className="text-2xl font-bold">המילים שלי</h1>
+      <h1 className="text-[26px] font-bold">המילים שלי</h1>
       <AddWordForm />
-      <ul className="surface divide-y divide-[var(--border)]">
+      <ul className="surface divide-y divide-line overflow-hidden">
         {words.map((w) => {
           const s = STATUS[w.status as keyof typeof STATUS];
           return (
@@ -45,7 +46,9 @@ export default async function WordsPage() {
                 )}
               </div>
               <form action={deleteWord.bind(null, w.id)}>
-                <button aria-label={`מחיקת ${w.english}`} className="muted size-11 rounded-full hover:bg-black/5 dark:hover:bg-white/10">✕</button>
+                <button aria-label={`מחיקת ${w.english}`} className="muted flex size-11 items-center justify-center rounded-full hover:bg-ground">
+                  <Icon name="x" size={18} />
+                </button>
               </form>
             </li>
           );
