@@ -51,7 +51,7 @@ const WRITE = { readOnlyHint: false, destructiveHint: false, idempotentHint: tru
 
 const json = (data: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] });
 
-// One server per request, bound to the owner behind the verified OAuth token.
+// One server per request, bound to the user behind the verified OAuth token.
 // Every query is scoped to that user id; DB errors surface to the assistant as tool errors.
 export function buildServer(userId: string) {
   const server = new McpServer({ name: "english-coach", version: "1.0.0" }, { instructions: INSTRUCTIONS });

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { authClient } from "@/lib/auth-client";
 
-export function LoginForm() {
+export function LoginForm({ google }: { google: boolean }) {
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -36,6 +36,19 @@ export function LoginForm() {
       </label>
       {error && <p role="alert" className="text-sm text-[var(--bad)]">{error}</p>}
       <button className="btn" disabled={pending}>{pending ? "רגע…" : "כניסה"}</button>
+      {google && (
+        <button
+          type="button"
+          className="btn"
+          disabled={pending}
+          onClick={() => {
+            setPending(true);
+            authClient.signIn.social({ provider: "google", callbackURL: "/", errorCallbackURL: "/login" });
+          }}
+        >
+          כניסה עם Google
+        </button>
+      )}
     </form>
   );
 }

@@ -3,13 +3,13 @@ import { addStarterWords, logout } from "@/app/actions";
 import { Icon } from "@/components/Icon";
 import { BOX_DAYS, dialogueForDay } from "@/lib/content";
 import { sql, today } from "@/lib/db";
-import { requireOwner } from "@/lib/session";
+import { requireUser } from "@/lib/session";
 import { correctOf, fmtRelDay, ScoreLine, type Scores } from "./progress/ui";
 
 type Coach = Scores & { id: string; topic: string; level: string; mode: string; started_at: Date; correct: number; total: number };
 
 export default async function Home() {
-  const userId = await requireOwner();
+  const userId = await requireUser();
   const day = today();
   const dialogue = dialogueForDay(day);
   const [[counts], boxes, [talk], [coach], [user]] = await Promise.all([
@@ -149,7 +149,7 @@ function Header({ name }: { name?: string }) {
   const now = new Date();
   const hour = Number(now.toLocaleString("en-US", { timeZone: "Asia/Jerusalem", hour: "numeric", hourCycle: "h23" }));
   const greeting = hour >= 5 && hour < 12 ? "בוקר טוב" : hour < 17 && hour >= 12 ? "צהריים טובים" : hour >= 17 && hour < 22 ? "ערב טוב" : "לילה טוב";
-  // create-owner stores the email as the name; only greet by a real first name.
+  // Password accounts made by create-owner have the email as name; only greet by a real first name.
   const first = name && !name.includes("@") ? name.split(" ")[0] : null;
 
   return (

@@ -11,7 +11,7 @@ Next.js 16 + TypeScript, Postgres (Neon בענן), Better Auth, פריסה ב־V
 
 ## איך זה עובד
 
-- **כניסה** – אימייל + סיסמה דרך Better Auth. אין הרשמה: את המשתמש יוצרים עם `npm run create-owner`. בנוסף, hook ב־`lib/auth.ts` חוסם יצירת סשן לכל מי שאינו `ALLOWED_EMAIL`.
+- **כניסה** – Google דרך Better Auth: חשבון נוצר בכניסה הראשונה, וכל משתמש רואה רק את הנתונים שלו (`user_id` בכל טבלה ובכל שאילתה). אימייל + סיסמה נשארו רק לחשבון שנוצר עם `npm run create-owner` (אין הרשמה בסיסמה).
 - **גישה לנתונים** – רק קוד השרת מדבר עם Postgres (ה־connection string קיים רק ב־Vercel), וכל שאילתה ופונקציה מסוננת לפי ה־user id של הבעלים. אין API ציבורי למסד.
 - **כרטיסיות** (`/cards`) – ״יודע״ מעלה את המילה קופסה ודוחה אותה ל־1/3/7/14/30/60 ימים; ״צריך לתרגל״ מחזיר לקופסה 0. הסימון נשמר ב־`reviews` (סימון עצמי). בכרטיס מוצג גם ״נבדק: x/y נכונות״ מתוך תשובות שנבדקו בפועל.
 - **מילים** (`/words`) – הוספה ומחיקה, או 40 מילים בסיסיות בלחיצה מדף הבית.
@@ -36,7 +36,7 @@ Next.js 16 + TypeScript, Postgres (Neon בענן), Better Auth, פריסה ב־V
 
 ```
 db/migrations/        0001: טבלאות Better Auth (נוצר ב-npx auth generate), 0002: טבלאות ופונקציות האפליקציה
-scripts/              migrate.mts (מריץ migrations), create-owner.mts (יוצר את המשתמש היחיד)
+scripts/              migrate.mts (מריץ migrations), create-owner.mts (חשבון סיסמה אופציונלי)
 lib/auth.ts           Better Auth: אימייל+סיסמה, נעילת בעלים, שרת OAuth 2.1 ל-MCP (mcp plugin)
 lib/mcp.ts            כלי ה-MCP
 app/mcp/route.ts      שרת ה-MCP: אימות token + בדיקה שהחיבור לא נותק
@@ -60,7 +60,7 @@ npm run db:up
 cp .env.example .env.local
 ```
 
-ב־`.env.local`: למלא `BETTER_AUTH_SECRET` (פלט של `openssl rand -hex 32`) ואת `ALLOWED_EMAIL`.
+ב־`.env.local`: למלא `BETTER_AUTH_SECRET` (פלט של `openssl rand -hex 32`) ואת `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` (לכניסה עם Google).
 
 ```bash
 npm run db:migrate
@@ -89,7 +89,8 @@ npm run dev
 | `DATABASE_URL` | נוסף אוטומטית ע״י Neon |
 | `BETTER_AUTH_SECRET` | `openssl rand -hex 32` |
 | `BETTER_AUTH_URL` | כתובת הפרודקשן, למשל `https://english-coach-mcp.vercel.app` |
-| `ALLOWED_EMAIL` | האימייל שלך |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | מ־Google Cloud Console (redirect URI: `<BETTER_AUTH_URL>/api/auth/callback/google`) |
+| `ALLOWED_EMAIL` | אופציונלי: האימייל של חשבון הסיסמה ש־`create-owner` יוצר |
 
 ### 3. סכמה ומשתמש ב־Neon
 

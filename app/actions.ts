@@ -6,7 +6,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { DIALOGUES, STARTER_WORDS } from "@/lib/content";
 import { sql } from "@/lib/db";
-import { requireOwner } from "@/lib/session";
+import { requireUser } from "@/lib/session";
 import { answerQuestion } from "@/lib/question-store";
 
 export async function logout() {
@@ -15,14 +15,14 @@ export async function logout() {
 }
 
 export async function reviewWord(wordId: string, knew: boolean) {
-  const userId = await requireOwner();
+  const userId = await requireUser();
   await sql("select review_word($1, $2, $3)", [userId, wordId, knew === true]).catch(() => {
     throw new Error("השמירה נכשלה");
   });
 }
 
 export async function addWord(_prev: string | null, form: FormData) {
-  const userId = await requireOwner();
+  const userId = await requireUser();
   const english = String(form.get("english") ?? "").trim();
   const hebrew = String(form.get("hebrew") ?? "").trim();
   const example = String(form.get("example") ?? "").trim() || null;
@@ -38,13 +38,13 @@ export async function addWord(_prev: string | null, form: FormData) {
 }
 
 export async function deleteWord(wordId: string) {
-  const userId = await requireOwner();
+  const userId = await requireUser();
   await sql("delete from words where id = $1 and user_id = $2", [wordId, userId]);
   revalidatePath("/words");
 }
 
 export async function addStarterWords() {
-  const userId = await requireOwner();
+  const userId = await requireUser();
   await sql(
     `insert into words (user_id, english, hebrew, example)
      select $1, w.english, w.hebrew, w.example from jsonb_to_recordset($2) as w(english text, hebrew text, example text)
@@ -56,7 +56,7 @@ export async function addStarterWords() {
 
 // The in-app daily dialogue is a checked practice session like any other (source "app").
 export async function saveConversation(requestId: string, dialogueId: string, picks: number[]) {
-  const userId = await requireOwner();
+  const userId = await requireUser();
   const dialogue = DIALOGUES.find((d) => d.id === dialogueId);
   if (!dialogue || !Array.isArray(picks) || picks.length !== dialogue.turns.length ||
       !picks.every((pick) => Number.isInteger(pick) && pick >= 0 && pick < 3) || !/^[\w-]{8,64}$/.test(requestId)) throw new Error("נתונים לא תקינים");
@@ -87,21 +87,20 @@ export async function saveConversation(requestId: string, dialogueId: string, pi
   }
 }
 
-// Disconnects an assistant: deleting its OAuth client removes the consent and all its
-// refresh tokens, and /mcp rejects its remaining access tokens (no consent → 401).
+// Disconnects an assistant for this user only. OAuth clients are shared (dynamic registration),
+// so the client stays; the user's consent and refresh tokens go (access tokens cascade), and
+// /mcp rejects any remaining access token because the consent is gone.
 export async function revokeConnection(clientId: string) {
-  const userId = await requireOwner();
-  await sql(
-    `delete from "oauthClient" c using "oauthConsent" cs
-     where c."clientId" = $1 and cs."clientId" = c."clientId" and cs."userId" = $2`,
-    [clientId, userId],
-  );
+  const userId = await requireUser();
+  await sql(`delete from "oauthConsent" where "clientId" = $1 and "userId" = $2`, [clientId, userId]);
+  await sql(`delete from "oauthRefreshToken" where "clientId" = $1 and "userId" = $2`, [clientId, userId]);
+  await sql(`delete from "oauthAccessToken" where "clientId" = $1 and "userId" = $2`, [clientId, userId]);
   revalidatePath("/progress");
 }
 
 // Only the identity and selected index cross the client boundary; grading is canonical in SQL.
 export async function answerPracticeQuestion(questionId: string, selectedIndex: number) {
-  const userId = await requireOwner();
+  const userId = await requireUser();
   try {
     const result = await answerQuestion(userId, questionId, selectedIndex);
     revalidatePath("/progress");

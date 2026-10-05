@@ -2,7 +2,7 @@ import Link from "next/link";
 import { DIALOGUES, dialogueForDay } from "@/lib/content";
 import { sql, today } from "@/lib/db";
 import { listPendingQuestions } from "@/lib/question-store";
-import { requireOwner } from "@/lib/session";
+import { requireUser } from "@/lib/session";
 import { Conversation } from "./Conversation";
 import { PersonalizedQuiz } from "./PersonalizedQuiz";
 
@@ -13,7 +13,7 @@ export default async function TalkPage({ searchParams }: PageProps<"/talk">) {
   const dialogue = selectedDialogue ?? dialogueForDay(day);
   const next = DIALOGUES[(DIALOGUES.indexOf(dialogue) + 1) % DIALOGUES.length];
 
-  const userId = await requireOwner();
+  const userId = await requireUser();
   const [questions, [done]] = await Promise.all([
     listPendingQuestions(userId),
     sql<{ correct: number; total: number }>(

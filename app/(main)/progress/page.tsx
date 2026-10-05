@@ -3,7 +3,7 @@ import { Fragment } from "react";
 import { revokeConnection } from "@/app/actions";
 import { Icon } from "@/components/Icon";
 import { sql } from "@/lib/db";
-import { requireOwner } from "@/lib/session";
+import { requireUser } from "@/lib/session";
 import { fmtDay, fmtTime, Meter, ResponseFormatChip, ResultBadge, SCORE_LABELS, SourceChip, type Scores } from "./ui";
 
 type Session = Scores & {
@@ -19,7 +19,7 @@ type Session = Scores & {
 };
 
 export default async function ProgressPage() {
-  const userId = await requireOwner();
+  const userId = await requireUser();
   const [sessions, [checked], [self], standalone, connections] = await Promise.all([
     sql<Session>(
       `select s.id, s.day, s.source, s.mode, s.topic, s.level, s.completed_at,

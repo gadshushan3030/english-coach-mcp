@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { Icon } from "@/components/Icon";
 import { TopBar } from "@/components/TopBar";
 import { sql } from "@/lib/db";
-import { requireOwner } from "@/lib/session";
+import { requireUser } from "@/lib/session";
 import { correctOf, fmtDay, fmtTime, Meter, ResponseFormatChip, ResultBadge, SCORE_LABELS, SOURCE, type Scores } from "../ui";
 
 type Sentence = { en: string; he?: string };
@@ -11,7 +11,7 @@ type NewWord = { english: string; hebrew: string; example?: string };
 
 export default async function PracticePage({ params }: PageProps<"/progress/[id]">) {
   const { id } = await params;
-  const userId = await requireOwner();
+  const userId = await requireUser();
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
   const [[s], exercises] = await Promise.all([
     sql<Scores & {
