@@ -23,6 +23,15 @@ export function ResultBadge({ result }: { result: string }) {
   return <span className="whitespace-nowrap text-xs font-semibold" style={{ color: r.color }}>{r.label}</span>;
 }
 
+export function ResponseFormatChip({ format }: { format: string }) {
+  const label = format === "multiple_choice"
+    ? "זיהוי בבחירה"
+    : format === "free_response"
+      ? "ניסוח עצמאי"
+      : "סוג מענה לא תועד";
+  return <span className="chip">{label}</span>;
+}
+
 export function ScoreLine({ scores }: { scores: Scores }) {
   const parts = Object.entries(SHORT_LABELS).flatMap(([k, label]) => {
     const v = scores[k as keyof Scores];

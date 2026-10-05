@@ -53,6 +53,9 @@ Want the same auth + MCP setup for your own app? It's extracted as a clean templ
 | `record_exercises` | Checked answers outside a session |
 | `add_words` / `set_word_familiarity` | Grow the deck, set familiarity 0–6 (reschedules review) |
 | `get_practice` / `get_exercises` | Read back by id to confirm what was stored |
+| `queue_practice_question` / `get_pending_questions` | Queue/read personalized three-choice questions from real conversation errors |
+
+See [personalized practice](docs/personalized-practice.md) for question inputs, retry behavior, and evidence types.
 
 ## Run locally
 

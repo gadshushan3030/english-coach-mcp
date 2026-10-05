@@ -10,7 +10,10 @@
     "db:up": "docker start english-coach-db 2>/dev/null || docker run -d --name english-coach-db -p 55432:5432 -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=english_coach -v english-coach-db:/var/lib/postgresql/data postgres:17-alpine",
     "db:migrate": "node --env-file-if-exists=.env.local scripts/migrate.mts",
     "create-owner": "node --env-file-if-exists=.env.local scripts/create-owner.mts",
-    "vercel-build": "node scripts/migrate.mts && next build"
+    "vercel-build": "node scripts/migrate.mts && next build",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "typecheck": "next typegen && tsc --noEmit",
+    "test:ui": "node scripts/test-personalized-quiz.mts"
   },
   "dependencies": {
     "@better-auth/mcp": "^1.7.6",
@@ -24,14 +27,18 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/pg": "^8.23.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "esbuild": "^0.28.2",
     "eslint": "^9",
     "eslint-config-next": "16.3.7",
+    "postcss": "^8.5.28",
     "tailwindcss": "^4",
+    "tsx": "^4.23.15",
     "typescript": "^5"
   }
 }

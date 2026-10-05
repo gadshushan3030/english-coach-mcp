@@ -4,6 +4,12 @@
 import { readdir, readFile } from "node:fs/promises";
 import pg from "pg";
 
+// Defense in depth for the review-only PR: never open a database connection if
+// Vercel attempts to build this branch despite its no-auto-deployment config.
+if (process.env.VERCEL_GIT_COMMIT_REF === "codex/conversation-practice-questions") {
+  throw new Error("Migrations are disabled for the review-only conversation-practice-questions branch");
+}
+
 const client = new pg.Client({ connectionString: process.env.DATABASE_URL_UNPOOLED || process.env.DATABASE_URL });
 await client.connect();
 await client.query("create table if not exists schema_migrations (name text primary key, applied_at timestamptz not null default now())");

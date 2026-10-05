@@ -1,6 +1,8 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
 import { sql, today } from "@/lib/db";
+import { practiceQuestionInput, responseFormat } from "@/lib/practice-questions";
+import { listPendingQuestions, queuePracticeQuestion } from "@/lib/question-store";
 
 const INSTRUCTIONS = `Practice data for one Hebrew-speaking learner of English (very basic level).
 
@@ -10,6 +12,10 @@ Workflow for a conversation:
 3. Talk with the learner.
 4. save_practice_results – once at the end: sentences practiced, corrections, new words, rubric scores, short feedback, and every exercise you checked.
 5. get_practice – read the record back to confirm it was stored.
+6. queue_practice_question – optionally turn actual errors into short questions for later practice in /talk. Supply exactly three distinct English choices, one correct_index (0–2), the actual original sentence, and a short Hebrew explanation. Link source_session_id when available. Never invent mistakes or record unanswered questions as checked exercises.
+7. get_pending_questions – confirm queued questions. Queuing does not count as learning evidence.
+
+Mark each checked exercise response_format as multiple_choice (recognition) or free_response (learner produced the answer). If unknown, omit it; historical/unspecified records are not evidence of free recall.
 
 Rubric, 1-5 each: comprehension = understood the question; vocabulary = used fitting words; grammar = correct sentences; pronunciation = only in voice mode, otherwise omit it.
 
@@ -31,6 +37,7 @@ const newWord = z.object({
 });
 const exercise = z.object({
   request_id: requestId,
+  response_format: responseFormat.default("unspecified").describe("multiple_choice is recognition, free_response is independently produced; unspecified if unknown"),
   question: z.string().min(1).max(500),
   answer: z.string().max(1000).describe("What the learner actually answered"),
   expected: z.string().max(500).optional().describe("The correct / model answer"),
@@ -71,7 +78,10 @@ export function buildServer(userId: string) {
           `select count(*) filter (where result = 'correct')::int as correct,
                   count(*) filter (where result = 'partial')::int as partial,
                   count(*) filter (where result = 'incorrect')::int as incorrect,
-                  count(*)::int as attempts
+                  count(*)::int as attempts,
+                  count(*) filter (where response_format = 'multiple_choice')::int as multiple_choice_attempts,
+                  count(*) filter (where response_format = 'free_response')::int as free_response_attempts,
+                  count(*) filter (where response_format = 'unspecified')::int as unspecified_attempts
            from exercises where user_id = $1`,
           [userId],
         ),
@@ -181,7 +191,7 @@ export function buildServer(userId: string) {
     async ({ practice_id, exercises }) => {
       const ids: string[] = [];
       for (const e of exercises) {
-        const [{ id }] = await sql<{ id: string }>("select record_exercise($1, $2, $3, $4, $5, $6, $7, $8, $9) as id", [
+        const [{ id }] = await sql<{ id: string }>("select record_exercise($1, $2, $3, $4, $5, $6, $7, $8, $9, p_response_format => $10) as id", [
           userId,
           e.request_id,
           e.question,
@@ -191,6 +201,7 @@ export function buildServer(userId: string) {
           e.attempt ?? null,
           practice_id ?? null,
           e.word ?? null,
+          e.response_format,
         ]);
         ids.push(id);
       }
@@ -264,6 +275,28 @@ export function buildServer(userId: string) {
     },
     async ({ exercise_ids }) =>
       json(await sql("select * from exercises where user_id = $1 and id = any($2::uuid[]) order by created_at", [userId, exercise_ids])),
+  );
+
+  server.registerTool(
+    "queue_practice_question",
+    {
+      title: "Queue a question from a conversation error",
+      description: "Save an unanswered personalized three-choice question for later practice in /talk. Use only actual conversation errors. This does not record an exercise or move a word schedule. Reuse request_id on retry; the first saved question is preserved.",
+      inputSchema: practiceQuestionInput,
+      annotations: WRITE,
+    },
+    async (input) => json({ question_id: await queuePracticeQuestion(userId, input), verify_with: "get_pending_questions" }),
+  );
+
+  server.registerTool(
+    "get_pending_questions",
+    {
+      title: "Read pending personalized questions",
+      description: "Unanswered questions for this learner, without answer keys. Completed questions leave the queue; answers appear in get_exercises and progress.",
+      inputSchema: z.object({ limit: z.number().int().min(1).max(100).default(20) }),
+      annotations: READ,
+    },
+    async ({ limit }) => json({ questions: await listPendingQuestions(userId, limit) }),
   );
 
   return server;

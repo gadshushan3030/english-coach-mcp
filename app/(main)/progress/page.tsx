@@ -4,7 +4,7 @@ import { revokeConnection } from "@/app/actions";
 import { Icon } from "@/components/Icon";
 import { sql } from "@/lib/db";
 import { requireUser } from "@/lib/session";
-import { fmtDay, fmtTime, Meter, ResultBadge, SCORE_LABELS, SourceChip, type Scores } from "./ui";
+import { fmtDay, fmtTime, Meter, ResponseFormatChip, ResultBadge, SCORE_LABELS, SourceChip, type Scores } from "./ui";
 
 type Session = Scores & {
   id: string;
@@ -29,17 +29,26 @@ export default async function ProgressPage() {
        where s.user_id = $1 group by s.id order by s.started_at desc limit 50`,
       [userId],
     ),
-    sql<{ correct: number; total: number }>(
-      `select count(*) filter (where result = 'correct')::int as correct, count(*)::int as total from exercises where user_id = $1`,
+    sql<{ correct: number; total: number; recognition_correct: number; recognition_total: number; free_correct: number; free_total: number; unspecified_correct: number; unspecified_total: number }>(
+      `select count(*) filter (where result = 'correct')::int as correct, count(*)::int as total,
+              count(*) filter (where response_format = 'multiple_choice' and result = 'correct')::int as recognition_correct,
+              count(*) filter (where response_format = 'multiple_choice')::int as recognition_total,
+              count(*) filter (where response_format = 'free_response' and result = 'correct')::int as free_correct,
+              count(*) filter (where response_format = 'free_response')::int as free_total,
+              count(*) filter (where response_format = 'unspecified' and result = 'correct')::int as unspecified_correct,
+              count(*) filter (where response_format = 'unspecified')::int as unspecified_total
+       from exercises where user_id = $1`,
       [userId],
     ),
     sql<{ know: number; practice: number }>(
       `select count(*) filter (where knew)::int as know, count(*) filter (where not knew)::int as practice from reviews where user_id = $1`,
       [userId],
     ),
-    sql<{ id: string; question: string; answer: string; expected: string | null; result: string; attempt: number; created_at: Date; english: string | null }>(
-      `select e.id, e.question, e.answer, e.expected, e.result, e.attempt, e.created_at, w.english
+    sql<{ id: string; question: string; answer: string; expected: string | null; result: string; attempt: number; created_at: Date; english: string | null; response_format: string; source_session_id: string | null; explanation_he: string | null }>(
+      `select e.id, e.question, e.answer, e.expected, e.result, e.attempt, e.created_at, w.english,
+              e.response_format, q.source_session_id, q.explanation_he
        from exercises e left join words w on w.id = e.word_id
+       left join practice_questions q on q.id = e.question_id and q.user_id = e.user_id
        where e.user_id = $1 and e.session_id is null order by e.created_at desc limit 30`,
       [userId],
     ),
@@ -88,7 +97,7 @@ export default async function ProgressPage() {
             <span className="muted text-xs">{self.practice} ״צריך לתרגל״ · מהכרטיסיות, לא נבדק</span>
           </div>
           <div className="flex flex-col gap-2 rounded-[14px] bg-accent-soft p-3">
-            <span className="text-[12.5px] font-semibold text-accent">נבדק בפועל</span>
+            <span className="text-[12.5px] font-semibold text-accent">תשובות שנבדקו</span>
             <span className="flex items-baseline gap-1.5">
               <span className="text-3xl font-semibold text-accent tabular-nums">
                 {checked.correct}/{checked.total}
@@ -98,7 +107,11 @@ export default async function ProgressPage() {
             <div className="flex h-2 overflow-hidden rounded-full bg-surface">
               <div className="bg-accent" style={{ width: `${checked.total ? (checked.correct / checked.total) * 100 : 0}%` }} />
             </div>
-            <span className="text-xs">תשובות שהמאמן או האפליקציה בדקו</span>
+            <div className="flex flex-col gap-1 text-xs">
+              <span>זיהוי בבחירה: {checked.recognition_correct}/{checked.recognition_total}</span>
+              <span>ניסוח עצמאי: {checked.free_correct}/{checked.free_total}</span>
+              {checked.unspecified_total > 0 && <span className="muted">סוג מענה לא תועד: {checked.unspecified_correct}/{checked.unspecified_total}</span>}
+            </div>
           </div>
         </div>
       </section>
@@ -163,9 +176,14 @@ export default async function ProgressPage() {
               <div className="min-w-0 flex-1 text-[13px]">
                 <div dir="auto" className="text-sm font-medium">{e.question}</div>
                 <div dir="auto" className="muted">תשובה: {e.answer || "—"}{e.expected && ` · צפוי: ${e.expected}`}</div>
+                {e.explanation_he && <p dir="rtl" lang="he" className="mt-1 text-sm leading-relaxed">{e.explanation_he}</p>}
                 <div className="muted text-xs">
                   ניסיון {e.attempt} · {fmtTime(e.created_at)}
                   {e.english && <> · <span dir="ltr" lang="en">{e.english}</span></>}
+                </div>
+                <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                  <ResponseFormatChip format={e.response_format} />
+                  {e.source_session_id && <Link href={`/progress/${e.source_session_id}`} className="text-xs text-accent underline underline-offset-4">לשיחת המקור</Link>}
                 </div>
               </div>
               <ResultBadge result={e.result} />
