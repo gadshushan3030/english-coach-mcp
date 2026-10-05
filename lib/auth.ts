@@ -9,10 +9,10 @@ export const MCP_RESOURCE = `${process.env.BETTER_AUTH_URL}/mcp`;
 export const auth = betterAuth({
   database: pool,
   emailAndPassword: { enabled: true, disableSignUp: true, minPasswordLength: 10 },
-  // Google sign-in creates an account on first use; every row is scoped by user id.
+  // Google sign-in creates an account on first use (and always asks which Google account to use); every row is scoped by user id.
   // Password sign-up stays off: only an account made by `npm run create-owner` can use it.
   socialProviders: process.env.GOOGLE_CLIENT_ID
-    ? { google: { clientId: process.env.GOOGLE_CLIENT_ID, clientSecret: process.env.GOOGLE_CLIENT_SECRET! } }
+    ? { google: { clientId: process.env.GOOGLE_CLIENT_ID, clientSecret: process.env.GOOGLE_CLIENT_SECRET!, prompt: "select_account" as const } }
     : {},
   // Session-to-JWT endpoint isn't used; OAuth access tokens come from mcp().
   disabledPaths: ["/token"],
