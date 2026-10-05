@@ -3,7 +3,7 @@ import { Icon } from "@/components/Icon";
 import { TopBar } from "@/components/TopBar";
 import { sql } from "@/lib/db";
 import { requireOwner } from "@/lib/session";
-import { correctOf, fmtDay, fmtTime, Meter, ResultBadge, SCORE_LABELS, SOURCE, type Scores } from "../ui";
+import { correctOf, fmtDay, fmtTime, Meter, ResponseFormatChip, ResultBadge, SCORE_LABELS, SOURCE, type Scores } from "../ui";
 
 type Sentence = { en: string; he?: string };
 type Correction = { original: string; corrected: string; note?: string };
@@ -18,8 +18,8 @@ export default async function PracticePage({ params }: PageProps<"/progress/[id]
       id: string; day: string; level: string; source: string; mode: string; topic: string; feedback: string | null;
       completed_at: Date | null; sentences: Sentence[]; corrections: Correction[]; new_words: NewWord[];
     }>("select * from practice_sessions where id = $1 and user_id = $2", [id, userId]),
-    sql<{ id: string; question: string; answer: string; expected: string | null; result: string; attempt: number; checked_by: string; english: string | null }>(
-      `select e.id, e.question, e.answer, e.expected, e.result, e.attempt, e.checked_by, w.english
+    sql<{ id: string; question: string; answer: string; expected: string | null; result: string; attempt: number; checked_by: string; english: string | null; response_format: string }>(
+      `select e.id, e.question, e.answer, e.expected, e.result, e.attempt, e.checked_by, e.response_format, w.english
        from exercises e left join words w on w.id = e.word_id
        where e.session_id = $1 and e.user_id = $2 order by e.created_at`,
       [id, userId],
@@ -132,6 +132,7 @@ export default async function PracticePage({ params }: PageProps<"/progress/[id]
                     נבדק ע״י {SOURCE[e.checked_by as keyof typeof SOURCE]}
                     {e.english && <> · <span dir="ltr" lang="en">{e.english}</span></>}
                   </div>
+                  <div className="mt-1.5"><ResponseFormatChip format={e.response_format} /></div>
                 </div>
                 <ResultBadge result={e.result} />
               </li>

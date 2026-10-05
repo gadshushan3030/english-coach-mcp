@@ -7,6 +7,7 @@ import { auth } from "@/lib/auth";
 import { DIALOGUES, STARTER_WORDS } from "@/lib/content";
 import { sql } from "@/lib/db";
 import { requireOwner } from "@/lib/session";
+import { answerQuestion } from "@/lib/question-store";
 
 export async function logout() {
   await auth.api.signOut({ headers: await headers() });
@@ -57,7 +58,8 @@ export async function addStarterWords() {
 export async function saveConversation(requestId: string, dialogueId: string, picks: number[]) {
   const userId = await requireOwner();
   const dialogue = DIALOGUES.find((d) => d.id === dialogueId);
-  if (!dialogue || picks.length !== dialogue.turns.length || !/^[\w-]{8,64}$/.test(requestId)) throw new Error("נתונים לא תקינים");
+  if (!dialogue || !Array.isArray(picks) || picks.length !== dialogue.turns.length ||
+      !picks.every((pick) => Number.isInteger(pick) && pick >= 0 && pick < 3) || !/^[\w-]{8,64}$/.test(requestId)) throw new Error("נתונים לא תקינים");
 
   try {
     const [{ id }] = await sql<{ id: string }>("select start_practice($1, $2, $3, 'A1', 'text', 'app') as id", [
@@ -72,6 +74,7 @@ export async function saveConversation(requestId: string, dialogueId: string, pi
       JSON.stringify(
         dialogue.turns.map((t, i) => ({
           request_id: `app:${requestId}:${i}`,
+          response_format: "multiple_choice",
           question: t.they,
           answer: t.options[picks[i]] ?? "",
           expected: t.options[t.answer],
@@ -94,4 +97,16 @@ export async function revokeConnection(clientId: string) {
     [clientId, userId],
   );
   revalidatePath("/progress");
+}
+
+// Only the identity and selected index cross the client boundary; grading is canonical in SQL.
+export async function answerPracticeQuestion(questionId: string, selectedIndex: number) {
+  const userId = await requireOwner();
+  try {
+    const result = await answerQuestion(userId, questionId, selectedIndex);
+    revalidatePath("/progress");
+    return result;
+  } catch {
+    throw new Error("השמירה נכשלה. אפשר לנסות שוב עם אותה בחירה");
+  }
 }
