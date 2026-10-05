@@ -1,6 +1,6 @@
 import { DIALOGUES, dialogueForDay } from "@/lib/content";
 import { sql, today } from "@/lib/db";
-import { requireOwner } from "@/lib/session";
+import { requireUser } from "@/lib/session";
 import { Conversation } from "./Conversation";
 
 export default async function TalkPage({ searchParams }: PageProps<"/talk">) {
@@ -9,7 +9,7 @@ export default async function TalkPage({ searchParams }: PageProps<"/talk">) {
   const dialogue = DIALOGUES.find((x) => x.id === d) ?? dialogueForDay(day);
   const next = DIALOGUES[(DIALOGUES.indexOf(dialogue) + 1) % DIALOGUES.length];
 
-  const userId = await requireOwner();
+  const userId = await requireUser();
   const [done] = await sql<{ correct: number; total: number }>(
     `select count(e.id) filter (where e.result = 'correct')::int as correct, count(e.id)::int as total
      from practice_sessions s left join exercises e on e.session_id = s.id

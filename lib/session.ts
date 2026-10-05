@@ -1,11 +1,11 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { cache } from "react";
-import { auth, isAllowedEmail } from "@/lib/auth";
+import { auth } from "@/lib/auth";
 
-// The signed-in owner's user id; anyone else goes to /login.
-export const requireOwner = cache(async () => {
+// The signed-in user's id; anyone else goes to /login. Every query is scoped by it.
+export const requireUser = cache(async () => {
   const session = await auth.api.getSession({ headers: await headers() });
-  if (!session || !isAllowedEmail(session.user.email)) redirect("/login");
+  if (!session) redirect("/login");
   return session.user.id;
 });

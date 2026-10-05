@@ -1,9 +1,9 @@
 import { sql } from "@/lib/db";
-import { requireOwner } from "@/lib/session";
+import { requireUser } from "@/lib/session";
 import { Deck } from "./Deck";
 
 export default async function CardsPage() {
-  const userId = await requireOwner();
+  const userId = await requireUser();
   const words = await sql<{ id: string; english: string; hebrew: string; example: string | null; box: number; correct: number; attempts: number }>(
     `select w.id, w.english, w.hebrew, w.example, w.box,
             count(e.id) filter (where e.result = 'correct')::int as correct, count(e.id)::int as attempts

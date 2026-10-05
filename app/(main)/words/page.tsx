@@ -1,7 +1,7 @@
 import { deleteWord } from "@/app/actions";
 import { Icon } from "@/components/Icon";
 import { sql } from "@/lib/db";
-import { requireOwner } from "@/lib/session";
+import { requireUser } from "@/lib/session";
 import { AddWordForm } from "./AddWordForm";
 
 const STATUS = {
@@ -11,7 +11,7 @@ const STATUS = {
 } as const;
 
 export default async function WordsPage() {
-  const userId = await requireOwner();
+  const userId = await requireUser();
   const words = await sql<{ id: string; english: string; hebrew: string; example: string | null; status: string; correct: number; attempts: number }>(
     `select w.id, w.english, w.hebrew, w.example, w.status,
             count(e.id) filter (where e.result = 'correct')::int as correct, count(e.id)::int as attempts
