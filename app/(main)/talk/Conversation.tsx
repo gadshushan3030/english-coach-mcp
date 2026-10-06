@@ -1,12 +1,28 @@
 "use client";
 
 import Link from "next/link";
-import { useState, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { saveConversation } from "@/app/actions";
 import { Icon } from "@/components/Icon";
 import { Speak } from "@/components/Speak";
 import { TopBar } from "@/components/TopBar";
+import { VoiceRecorder } from "@/components/VoiceRecorder";
 import type { Dialogue } from "@/lib/content";
+import {
+  advanceConversation,
+  confirmConversationDraft,
+  conversationStorageKey,
+  createConversationDraft,
+  parseConversationDraft,
+  pickConversationAnswer,
+  type ConversationDraft,
+} from "@/lib/conversation-state";
+
+function newRequestId() {
+  return typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `run-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+}
 
 // `shift` rotates the answer order per day, so the right answer isn't always in the same spot.
 export function Conversation({
@@ -14,99 +30,215 @@ export function Conversation({
   nextId,
   shift,
   doneToday,
+  learnerId,
+  learnerKey,
+  onComplete,
+  embedded = false,
 }: {
   dialogue: Dialogue;
   nextId: string;
   shift: number;
   doneToday: { correct: number; total: number } | null;
+  /** Authenticated identity rendered by the server; the action verifies it again. */
+  learnerId: string;
+  /** User and date scope, supplied by the authenticated server page. */
+  learnerKey?: string;
+  /** Only pass a callback from another Client Component. */
+  onComplete?: () => void;
+  embedded?: boolean;
 }) {
-  const [t, setT] = useState(0);
-  const [picked, setPicked] = useState<number | null>(null);
-  const [picks, setPicks] = useState<number[]>([]);
-  // One id per run: a retried save is recognized and not stored twice.
-  const [requestId] = useState(() => crypto.randomUUID());
-  const score = picks.filter((p, i) => p === dialogue.turns[i].answer).length;
-  const [saved, setSaved] = useState<"no" | "yes" | "error">("no");
+  const [draft, setDraft] = useState<ConversationDraft | null>(null);
+  const draftRef = useRef<ConversationDraft | null>(null);
+  const loadedKey = useRef<string | null>(null);
+  const saving = useRef(false);
+  const notified = useRef(false);
+  const [saveError, setSaveError] = useState(false);
+  const [storageNotice, setStorageNotice] = useState<string | null>(null);
+  const [restored, setRestored] = useState(false);
+  const [reconciled, setReconciled] = useState(false);
   const [pending, startTransition] = useTransition();
+  const storageKey = learnerKey ? conversationStorageKey(learnerKey, dialogue.id) : null;
+
+  const commit = useCallback((next: ConversationDraft) => {
+    draftRef.current = next;
+    setDraft(next);
+    if (storageKey) {
+      try {
+        sessionStorage.setItem(storageKey, JSON.stringify(next));
+      } catch {
+        setStorageNotice("הדפדפן לא מאפשר לשמור את התרגול המקומי. כדאי לסיים לפני רענון העמוד.");
+      }
+    }
+  }, [storageKey]);
+
+  useEffect(() => {
+    const scope = storageKey ?? `${learnerId}:${dialogue.id}`;
+    if (loadedKey.current === scope) return;
+    let active = true;
+    // Restore after hydration so server and browser first render the same markup.
+    queueMicrotask(() => {
+      if (!active) return;
+      let previous: ConversationDraft | null = null;
+      if (storageKey) {
+        try {
+          previous = parseConversationDraft(sessionStorage.getItem(storageKey), dialogue);
+        } catch {
+          setStorageNotice("הדפדפן לא מאפשר לשמור את התרגול המקומי. כדאי לסיים לפני רענון העמוד.");
+        }
+      }
+      const requestId = newRequestId();
+      loadedKey.current = scope;
+      notified.current = false;
+      setSaveError(false);
+      setReconciled(false);
+      setRestored(Boolean(previous && previous.picks.length > 0 && !previous.saved));
+      commit(previous ?? createConversationDraft(dialogue.id, requestId));
+    });
+    return () => { active = false; };
+  }, [dialogue, learnerId, storageKey, commit]);
+
+  const save = useCallback(() => {
+    const current = draftRef.current;
+    if (!current || current.saved || current.turn !== dialogue.turns.length || saving.current) return;
+    saving.current = true;
+    const scope = loadedKey.current;
+    setSaveError(false);
+    startTransition(async () => {
+      try {
+        const result = await saveConversation(current.requestId, dialogue.id, current.picks, learnerId);
+        const confirmed = confirmConversationDraft(current, result, dialogue);
+        if (!confirmed) throw new Error("Incomplete conversation confirmation");
+        if (draftRef.current?.requestId === current.requestId && loadedKey.current === scope) {
+          setReconciled(confirmed.picks.some((pick, index) => pick !== current.picks[index]));
+          commit(confirmed);
+        }
+      } catch {
+        if (draftRef.current?.requestId === current.requestId && loadedKey.current === scope) setSaveError(true);
+      } finally {
+        saving.current = false;
+      }
+    });
+  }, [dialogue, learnerId, commit]);
+
+  useEffect(() => {
+    if (draft && draft.turn === dialogue.turns.length && !draft.saved && !saveError) save();
+  }, [draft, dialogue.turns.length, saveError, save]);
+
+  useEffect(() => {
+    if (draft?.saved && onComplete && !notified.current) {
+      notified.current = true;
+      onComplete();
+    }
+  }, [draft?.saved, onComplete]);
 
   const n = dialogue.turns.length;
-  const finished = t >= n;
-  const history = dialogue.turns.slice(0, t);
+  const finished = Boolean(draft && draft.turn >= n);
+  const unconfirmed = finished && !draft?.saved;
+
+  useEffect(() => {
+    if (!unconfirmed) return;
+    const beforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    const preventLinkNavigation = (event: MouseEvent) => {
+      const element = event.target instanceof Element ? event.target : null;
+      if (element?.closest("a[href]")) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    };
+    window.addEventListener("beforeunload", beforeUnload);
+    document.addEventListener("click", preventLinkNavigation, true);
+    return () => {
+      window.removeEventListener("beforeunload", beforeUnload);
+      document.removeEventListener("click", preventLinkNavigation, true);
+    };
+  }, [unconfirmed]);
 
   const advance = () => {
-    const nextT = t + 1;
-    setPicked(null);
-    setT(nextT);
-    if (nextT >= n) {
-      startTransition(async () => {
-        try {
-          await saveConversation(requestId, dialogue.id, picks);
-          setSaved("yes");
-        } catch {
-          setSaved("error");
-        }
-      });
-    }
+    const current = draftRef.current;
+    if (current) commit(advanceConversation(current, dialogue));
   };
+
+  const restart = () => {
+    if (!draftRef.current?.saved || embedded) return;
+    notified.current = false;
+    setSaveError(false);
+    setRestored(false);
+    setReconciled(false);
+    commit(createConversationDraft(dialogue.id, newRequestId()));
+  };
+
+  const score = draft?.picks.filter((pick, index) => pick === dialogue.turns[index].answer).length ?? 0;
 
   return (
     <section data-focus className="flex flex-col gap-3.5">
-      <TopBar title="שיחה יומית" end={`${Math.min(t + 1, n)}/${n}`} />
+      {!embedded && (unconfirmed ? (
+        <div className="flex h-11 items-center justify-between gap-2">
+          <button type="button" aria-label="חזרה לבית אחרי השמירה" disabled className="flex size-11 items-center justify-center rounded-full border border-line opacity-50"><Icon name="back" size={20} /></button>
+          <span className="font-semibold">שיחה יומית</span>
+          <span className="muted font-mono text-[13px]">{n}/{n}</span>
+        </div>
+      ) : <TopBar title="שיחה יומית" end={`${Math.min((draft?.turn ?? 0) + 1, n)}/${n}`} />)}
       <div className="flex flex-col gap-0.5">
         <h1 className="text-[22px] font-bold">{dialogue.title}</h1>
+        {"level" in dialogue && typeof dialogue.level === "string" && <p className="muted text-xs">רמת התרגול בשיחה: {dialogue.level}</p>}
         <p className={`text-[13px] ${doneToday ? "text-accent" : "muted"}`}>
           {doneToday ? `תורגלה היום · ${doneToday.correct}/${doneToday.total}` : `${n} משפטים · 2 דקות`}
         </p>
       </div>
+      {restored && <p role="status" className="text-xs text-accent">המשכנו מהמקום שבו עצרת.</p>}
+      {storageNotice && <p role="status" className="text-xs text-warn">{storageNotice}</p>}
+      {!draft && <p role="status" className="muted text-sm">פותחים את התרגול…</p>}
 
       <div className="flex flex-col gap-2">
-        {history.map((turn, k) => (
-          <div key={k} className="flex flex-col items-start gap-2">
+        {dialogue.turns.slice(0, draft?.turn ?? 0).map((turn, index) => (
+          <div key={index} className="flex flex-col items-start gap-2">
             <Bubble side="they" text={turn.they} />
             <div className="flex flex-col items-end gap-1 self-stretch">
               <Bubble side="you" text={turn.options[turn.answer]} />
-              {picks[k] === turn.answer ? (
-                <span className="flex items-center gap-1 text-xs text-accent">
-                  <Icon name="check" size={13} strokeWidth={2.4} />
-                  נכון
-                </span>
+              {draft?.picks[index] === turn.answer ? (
+                <span className="flex items-center gap-1 text-xs text-accent"><Icon name="check" size={13} strokeWidth={2.4} />נכון</span>
               ) : (
-                <span className="flex items-center gap-1 text-xs text-warn">
-                  <Icon name="x" size={13} strokeWidth={2.4} />
-                  בחרת: <span dir="ltr" lang="en">{turn.options[picks[k]]}</span>
-                </span>
+                <span className="flex items-center gap-1 text-xs text-warn"><Icon name="x" size={13} strokeWidth={2.4} />בחרת: <span dir="ltr" lang="en">{turn.options[draft?.picks[index] ?? 0]}</span></span>
               )}
             </div>
           </div>
         ))}
       </div>
 
-      {!finished && (
-        <Current
-          key={t}
-          turn={dialogue.turns[t]}
-          shift={shift + t}
-          picked={picked}
-          onPick={(i) => {
-            setPicked(i);
-            setPicks([...picks, i]);
+      {draft && !finished && (
+        <Current key={draft.turn} turn={dialogue.turns[draft.turn]} shift={shift + draft.turn}
+          picked={draft.picks[draft.turn] ?? null}
+          onPick={(pick) => {
+            const current = draftRef.current;
+            if (current) commit(pickConversationAnswer(current, pick, dialogue));
           }}
-          onNext={advance}
-        />
+          onNext={advance} />
       )}
 
       {finished && (
         <div className="surface flex flex-col items-center gap-3 p-6 text-center">
-          <p className="text-3xl font-bold tabular-nums">
-            {score}/{n}
+          <p className="text-3xl font-bold tabular-nums">{score}/{n}</p>
+          <p role={saveError ? "alert" : "status"} className={`text-sm ${saveError ? "text-warn" : "muted"}`}>
+            {pending ? "בשמירה…" : saveError ? (storageKey && !storageNotice ? "השמירה נכשלה. התשובות נשמרו בדפדפן; אפשר לנסות שוב." : "השמירה נכשלה. אפשר לנסות שוב לפני שעוזבים את העמוד.") : draft?.saved ? "נשמר בהתקדמות" : "מכינים לשמירה…"}
           </p>
-          <p className="muted text-sm">
-            {pending ? "בשמירה…" : saved === "error" ? "השמירה נכשלה" : saved === "yes" ? "נשמר בהתקדמות" : ""}
-          </p>
-          <div className="flex flex-wrap justify-center gap-2">
-            <Link href={`/talk?d=${nextId}`} className="btn">שיחה נוספת</Link>
-            <Link href="/" className="btn btn-ghost">לדף הבית</Link>
-          </div>
+          {reconciled && <p role="status" className="text-xs text-accent">השיחה כבר נשמרה בלשונית אחרת. מוצגות הבחירות שנשמרו.</p>}
+          {saveError && <button type="button" className="btn" disabled={pending} onClick={save}>ניסיון שמירה נוסף</button>}
+          {unconfirmed && <p className="muted text-xs">אפשר להמשיך אחרי שהשמירה תושלם.</p>}
+          {!embedded && (draft?.saved ? (
+            <div className="flex flex-wrap justify-center gap-2">
+              <button type="button" className="btn btn-ghost" onClick={restart}>תרגול חוזר</button>
+              <Link href={`/talk?d=${nextId}`} className="btn">שיחה נוספת</Link>
+              <Link href="/" className="btn btn-ghost">לדף הבית</Link>
+            </div>
+          ) : (
+            <div className="flex flex-wrap justify-center gap-2">
+              <button type="button" className="btn" disabled>שיחה נוספת</button>
+              <button type="button" className="btn btn-ghost" disabled>לדף הבית</button>
+            </div>
+          ))}
         </div>
       )}
     </section>
@@ -133,7 +265,7 @@ function Current({
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-1.5">
-        <div className="flex items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
           <Bubble side="they" text={turn.they} />
           <Speak text={turn.they} />
           <button
@@ -194,7 +326,8 @@ function Current({
               <span dir="ltr" lang="en" className="font-semibold">{turn.options[turn.answer]}</span> · {turn.answerHe}
             </span>
           </div>
-          <button className="btn h-14 rounded-2xl text-[17px]" onClick={onNext}>המשך</button>
+          <VoiceRecorder prompt={turn.options[turn.answer]} />
+          <button type="button" className="btn h-14 rounded-2xl text-[17px]" onClick={onNext}>המשך</button>
         </>
       )}
     </div>

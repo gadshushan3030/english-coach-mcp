@@ -5,6 +5,8 @@ import { Icon } from "@/components/Icon";
 import { sql } from "@/lib/db";
 import { requireUser } from "@/lib/session";
 import { fmtDay, fmtTime, Meter, ResponseFormatChip, ResultBadge, SCORE_LABELS, SourceChip, type Scores } from "./ui";
+import { Insights } from "./Insights";
+import { getReviewSummary } from "@/lib/learning-store";
 
 type Session = Scores & {
   id: string;
@@ -20,6 +22,7 @@ type Session = Scores & {
 
 export default async function ProgressPage() {
   const userId = await requireUser();
+  await getReviewSummary(userId);
   const [sessions, [checked], [self], standalone, connections] = await Promise.all([
     sql<Session>(
       `select s.id, s.day, s.source, s.mode, s.topic, s.level, s.completed_at,
@@ -29,10 +32,12 @@ export default async function ProgressPage() {
        where s.user_id = $1 group by s.id order by s.started_at desc limit 50`,
       [userId],
     ),
-    sql<{ correct: number; total: number; recognition_correct: number; recognition_total: number; free_correct: number; free_total: number; unspecified_correct: number; unspecified_total: number }>(
+    sql<{ correct: number; total: number; recognition_correct: number; recognition_total: number; gap_correct: number; gap_total: number; free_correct: number; free_total: number; unspecified_correct: number; unspecified_total: number }>(
       `select count(*) filter (where result = 'correct')::int as correct, count(*)::int as total,
               count(*) filter (where response_format = 'multiple_choice' and result = 'correct')::int as recognition_correct,
               count(*) filter (where response_format = 'multiple_choice')::int as recognition_total,
+              count(*) filter (where response_format = 'gap_completion' and result = 'correct')::int as gap_correct,
+              count(*) filter (where response_format = 'gap_completion')::int as gap_total,
               count(*) filter (where response_format = 'free_response' and result = 'correct')::int as free_correct,
               count(*) filter (where response_format = 'free_response')::int as free_total,
               count(*) filter (where response_format = 'unspecified' and result = 'correct')::int as unspecified_correct,
@@ -46,9 +51,11 @@ export default async function ProgressPage() {
     ),
     sql<{ id: string; question: string; answer: string; expected: string | null; result: string; attempt: number; created_at: Date; english: string | null; response_format: string; source_session_id: string | null; explanation_he: string | null }>(
       `select e.id, e.question, e.answer, e.expected, e.result, e.attempt, e.created_at, w.english,
-              e.response_format, q.source_session_id, q.explanation_he
+              e.response_format, q.source_session_id, coalesce(a.explanation_he,q.explanation_he) as explanation_he
        from exercises e left join words w on w.id = e.word_id
-       left join practice_questions q on q.id = e.question_id and q.user_id = e.user_id
+       left join practice_skill_attempts a on a.exercise_id=e.id and a.user_id=e.user_id
+       left join practice_skills skill on skill.id=a.review_id and skill.user_id=e.user_id
+       left join practice_questions q on q.id = coalesce(e.question_id,skill.question_id) and q.user_id = e.user_id
        where e.user_id = $1 and e.session_id is null order by e.created_at desc limit 30`,
       [userId],
     ),
@@ -73,6 +80,8 @@ export default async function ProgressPage() {
         <h1 className="text-[26px] font-bold">התקדמות</h1>
         <p className="muted text-[13px]">כל השיחות והתרגילים, מהאפליקציה ומהמאמן</p>
       </header>
+
+      <Insights userId={userId} />
 
       <section className="surface flex flex-col gap-3.5 px-[18px] py-4">
         <div className="flex flex-col gap-0.5">
@@ -109,6 +118,7 @@ export default async function ProgressPage() {
             </div>
             <div className="flex flex-col gap-1 text-xs">
               <span>זיהוי בבחירה: {checked.recognition_correct}/{checked.recognition_total}</span>
+              <span>השלמת משפט: {checked.gap_correct}/{checked.gap_total}</span>
               <span>ניסוח עצמאי: {checked.free_correct}/{checked.free_total}</span>
               {checked.unspecified_total > 0 && <span className="muted">סוג מענה לא תועד: {checked.unspecified_correct}/{checked.unspecified_total}</span>}
             </div>

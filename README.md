@@ -10,8 +10,13 @@ Want the same auth + MCP setup for your own app? It's extracted as a clean templ
 
 ## What it does
 
+- **One daily plan** (`/practice`): a capped sequence of due words, new personal questions, spaced mistake reviews and a short dialogue; confirmed stages resume in the same tab after refresh.
+- **Personal goals and placement** (`/settings`): everyday/work/travel, a 5/10/15-minute budget, and six checked placement questions or a self-selected starting level. The short assessment estimates A0–B1; it is not a certified CEFR test. Authored dialogues cover four practice bands, with their actual level displayed.
+- **Mistakes return over time**: first answers remain immutable, while later attempts progress from recognition to gap completion and independent sentence correction. Optional coach-authored variants introduce new contexts. Typed grading compares to expected wording and accepts minor punctuation/case differences; it does not assess unrestricted semantic correctness.
+- **Editable vocabulary**: English/Hebrew/example search, self-assessment filters, edit, archive and undo. Archiving retains learning history and suspends word scheduling.
+- **Useful progress**: weekly personal mistakes with focused review links and delayed word checks measured from the immediately preceding checked attempt.
 - **Flashcards** (English → Hebrew) with spaced repetition: "I know" moves a word up a box (review in 1/3/7/14/30/60 days), "Need practice" resets it.
-- **Daily conversation**: one short scripted dialogue a day, with translation and speech (browser `speechSynthesis`).
+- **Daily conversation**: adaptive scripted dialogues with translation, browser speech with English voice selection and visible retry feedback, retry-safe saving and refresh recovery. Temporary microphone recording/playback stays local and is deleted on continuation/refresh; audio is not uploaded or graded.
 - **Assistant practice over MCP**: ChatGPT opens a session, talks with me, then stores the sentences practiced, corrections, new words, a fixed 1–5 rubric (comprehension, vocabulary, grammar, pronunciation only for voice) and every exercise it checked.
 - **Progress dashboard**: every session and exercise, self-assessment vs. checked answers side by side, connected assistants with a disconnect button.
 
@@ -54,8 +59,9 @@ Want the same auth + MCP setup for your own app? It's extracted as a clean templ
 | `add_words` / `set_word_familiarity` | Grow the deck, set familiarity 0–6 (reschedules review) |
 | `get_practice` / `get_exercises` | Read back by id to confirm what was stored |
 | `queue_practice_question` / `get_pending_questions` | Queue/read personalized three-choice questions from real conversation errors |
+| `get_pending_reviews` | Due recognition, gap-completion and independent correction tasks without answer keys |
 
-See [personalized practice](docs/personalized-practice.md) for question inputs, retry behavior, and evidence types.
+`get_progress` also returns the learner's preferences and scheduled-review summary. See [personalized practice](docs/personalized-practice.md) for question inputs, retry behavior, evidence types and rollout notes.
 
 ## Run locally
 

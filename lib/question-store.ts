@@ -1,5 +1,6 @@
 import { sql } from "./db";
 import { practiceQuestionInput, questionAnswerInput, type PendingQuestion, type QuestionResult } from "./practice-questions";
+import { queueReviewVariants } from "./learning-store";
 
 // Never send the answer key or explanation with unanswered questions.
 export async function listPendingQuestions(userId: string, limit = 20) {
@@ -18,6 +19,7 @@ export async function queuePracticeQuestion(userId: string, input: unknown) {
     [userId, q.request_id, q.question, JSON.stringify(q.choices), q.correct_index,
       q.explanation_he, q.original, q.source_session_id ?? null, q.word ?? null],
   );
+  if (q.review_variants !== undefined) await queueReviewVariants(userId,id,q.review_variants);
   return id;
 }
 

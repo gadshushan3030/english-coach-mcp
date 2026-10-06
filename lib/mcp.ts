@@ -3,8 +3,10 @@ import * as z from "zod/v4";
 import { sql, today } from "@/lib/db";
 import { practiceQuestionInput, responseFormat } from "@/lib/practice-questions";
 import { listPendingQuestions, queuePracticeQuestion } from "@/lib/question-store";
+import { getReviewSummary, listDueReviews } from "@/lib/learning-store";
+import { readLearnerProfile } from "@/lib/profile-store";
 
-const INSTRUCTIONS = `Practice data for one Hebrew-speaking learner of English (very basic level).
+const INSTRUCTIONS = `Practice data for a Hebrew-speaking learner of English. Read learning_preferences from get_progress and tailor topic and difficulty to their goal and starting level. Diagnostic level is a short placement estimate, not a certified CEFR result.
 
 Workflow for a conversation:
 1. get_progress – due words and recent practice.
@@ -12,10 +14,11 @@ Workflow for a conversation:
 3. Talk with the learner.
 4. save_practice_results – once at the end: sentences practiced, corrections, new words, rubric scores, short feedback, and every exercise you checked.
 5. get_practice – read the record back to confirm it was stored.
-6. queue_practice_question – optionally turn actual errors into short questions for later practice in /talk. Supply exactly three distinct English choices, one correct_index (0–2), the actual original sentence, and a short Hebrew explanation. Link source_session_id when available. Never invent mistakes or record unanswered questions as checked exercises.
+6. queue_practice_question – turn useful actual errors into short questions for later practice in /talk and the daily plan. Supply exactly three distinct English choices, one correct_index (0–2), the actual original sentence, and a short Hebrew explanation. Link source_session_id when available. Include 2–3 review_variants with different contexts testing the same skill when useful. A variant's original is an intentionally flawed example, not a claim that the learner made that error. Never invent source mistakes or record unanswered questions as checked exercises.
 7. get_pending_questions – confirm queued questions. Queuing does not count as learning evidence.
 
-Mark each checked exercise response_format as multiple_choice (recognition) or free_response (learner produced the answer). If unknown, omit it; historical/unspecified records are not evidence of free recall.
+The app schedules reviewed mistakes automatically: recognition, gap completion, then independent sentence correction. get_pending_reviews reads upcoming practice without answer keys. App text grading checks expected wording, not unrestricted semantic correctness.
+Mark each checked exercise response_format as multiple_choice (recognition), gap_completion (fill a gap) or free_response (learner produced the answer). If unknown, omit it; historical/unspecified records are not evidence of free recall.
 
 Rubric, 1-5 each: comprehension = understood the question; vocabulary = used fitting words; grammar = correct sentences; pronunciation = only in voice mode, otherwise omit it.
 
@@ -65,13 +68,13 @@ export function buildServer(userId: string) {
       annotations: READ,
     },
     async ({ due_limit }) => {
-      const [[words], [checked], dueWords, recent] = await Promise.all([
+      const [[words], [checked], dueWords, recent, preferences, reviews] = await Promise.all([
         sql(
           `select count(*)::int as total,
                   count(*) filter (where status = 'known')::int as self_marked_known,
                   count(*) filter (where status = 'practice')::int as self_marked_practice,
                   count(*) filter (where due_at <= now())::int as due_now
-           from words where user_id = $1`,
+           from words where user_id = $1 and archived_at is null`,
           [userId],
         ),
         sql(
@@ -80,6 +83,7 @@ export function buildServer(userId: string) {
                   count(*) filter (where result = 'incorrect')::int as incorrect,
                   count(*)::int as attempts,
                   count(*) filter (where response_format = 'multiple_choice')::int as multiple_choice_attempts,
+                  count(*) filter (where response_format = 'gap_completion')::int as gap_completion_attempts,
                   count(*) filter (where response_format = 'free_response')::int as free_response_attempts,
                   count(*) filter (where response_format = 'unspecified')::int as unspecified_attempts
            from exercises where user_id = $1`,
@@ -89,7 +93,7 @@ export function buildServer(userId: string) {
           `select w.english, w.hebrew, w.example, w.box as familiarity,
                   json_build_object('correct', count(e.id) filter (where e.result = 'correct'), 'attempts', count(e.id)) as checked
            from words w left join exercises e on e.word_id = w.id
-           where w.user_id = $1 and w.due_at <= now()
+           where w.user_id = $1 and w.archived_at is null and w.due_at <= now()
            group by w.id order by w.due_at limit $2`,
           [userId, due_limit],
         ),
@@ -101,8 +105,10 @@ export function buildServer(userId: string) {
            where s.user_id = $1 group by s.id order by s.started_at desc limit 5`,
           [userId],
         ),
+        readLearnerProfile(userId),getReviewSummary(userId),
       ]);
-      return json({ today: today(), words, checked_answers: checked, due_words: dueWords, recent_practice: recent });
+      return json({ today: today(), learning_preferences: preferences.profile, preferences_configured: preferences.configured,
+        scheduled_reviews: reviews, words, checked_answers: checked, due_words: dueWords, recent_practice: recent });
     },
   );
 
@@ -213,7 +219,7 @@ export function buildServer(userId: string) {
     "add_words",
     {
       title: "Add words to the deck",
-      description: "Adds new words. Words that already exist are left unchanged.",
+      description: "Adds new words and restores archived words. Active words that already exist are left unchanged.",
       inputSchema: z.object({ words: z.array(newWord).min(1).max(50) }),
       annotations: WRITE,
     },
@@ -221,12 +227,12 @@ export function buildServer(userId: string) {
       const added = await sql<{ english: string }>(
         `insert into words (user_id, english, hebrew, example)
          select $1, w.english, w.hebrew, w.example from jsonb_to_recordset($2) as w(english text, hebrew text, example text)
-         on conflict (user_id, english) do nothing returning english`,
+         on conflict (user_id, english) do update set archived_at=null where words.archived_at is not null returning english`,
         [userId, JSON.stringify(words)],
       );
       const isNew = new Set(added.map((w) => w.english));
       const rows = await sql<{ id: string; english: string; hebrew: string; familiarity: number }>(
-        "select id, english, hebrew, box as familiarity from words where user_id = $1 and english = any($2)",
+        "select id, english, hebrew, box as familiarity from words where user_id = $1 and archived_at is null and english = any($2)",
         [userId, words.map((w) => w.english)],
       );
       return json({ words: rows.map((w) => ({ ...w, already_existed: !isNew.has(w.english) })) });
@@ -297,6 +303,17 @@ export function buildServer(userId: string) {
       annotations: READ,
     },
     async ({ limit }) => json({ questions: await listPendingQuestions(userId, limit) }),
+  );
+
+  server.registerTool(
+    "get_pending_reviews",
+    {
+      title: "Read spaced personal-error reviews",
+      description: "Due recognition, gap-completion and sentence-correction tasks without answer keys. Use learning_preferences from get_progress to adapt the conversation.",
+      inputSchema: z.object({limit:z.number().int().min(1).max(100).default(20)}),
+      annotations: READ,
+    },
+    async ({limit}) => json({reviews:await listDueReviews(userId,{limit})}),
   );
 
   return server;

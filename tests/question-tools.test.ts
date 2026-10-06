@@ -12,7 +12,7 @@ let db: PGlite;
 const servers: ReturnType<typeof buildServer>[] = [];
 before(async () => {
   db = new PGlite();
-  for (const file of ["0001_auth.sql", "0002_app.sql", "0003_practice_questions.sql"]) {
+  for (const file of ["0001_auth.sql", "0002_app.sql", "0003_practice_questions.sql", "0004_learning_loop.sql", "0005_word_management.sql", "0006_learner_profile.sql", "0007_active_words.sql"]) {
     await db.exec(await readFile(new URL(`../db/migrations/${file}`, import.meta.url), "utf8"));
   }
   await db.exec(`insert into "user" (id,name,email,"emailVerified") values
@@ -63,6 +63,7 @@ const question = {
   original: "I want to listening podcast",
   choices: ["I want to listening podcast", "I want to listen to podcasts", "I want listen podcasts"],
   correct_index: 1, explanation_he: "אחרי want משתמשים ב־to ובפועל הבסיסי.",
+  review_variants:[{question:"Which is correct?",original:"I want to cooking dinner",choices:["I want to cooking dinner","I want to cook dinner","I want cook dinner"],correct_index:1,explanation_he:"אחרי want משתמשים ב־to ובפועל הבסיסי."}],
 };
 test("MCP lists tools, validates inputs, queues per-user, hides keys, and preserves canonical retries", { timeout: 15000 }, async () => {
   const one = await client("one");
@@ -70,6 +71,7 @@ test("MCP lists tools, validates inputs, queues per-user, hides keys, and preser
   const listed = await one.request("tools/list", {});
   assert(listed.tools?.some((tool) => tool.name === "queue_practice_question"));
   assert(listed.tools?.some((tool) => tool.name === "get_pending_questions"));
+  assert(listed.tools?.some((tool) => tool.name === "get_pending_reviews"));
   const invalid = await one.call("queue_practice_question", { ...question, choices: ["a", "a", "c"] });
   assert.equal(invalid.isError, true);
   assert.deepEqual(await listPendingQuestions("one"), []);
@@ -97,4 +99,13 @@ test("MCP lists tools, validates inputs, queues per-user, hides keys, and preser
   assert.equal(JSON.parse(read.content[0].text)[0].response_format, "multiple_choice");
   const inaccessible = await two.call("get_exercises", { exercise_ids: [answer.exercise_id] });
   assert.deepEqual(JSON.parse(inaccessible.content[0].text), []);
+  const progress=await one.call("get_progress",{});
+  assert.notEqual(progress.isError,true);
+  const data=JSON.parse(progress.content[0].text);
+  assert.equal(data.learning_preferences.goal,"everyday");
+  assert.equal(data.scheduled_reviews.total,1);
+  const variants=(await db.query<{question_id:string}>("select question_id from practice_question_variants where user_id='one'")).rows;
+  assert.equal(variants.length,1);assert.equal(variants[0].question_id,question_id);
+  const reviews=await two.call("get_pending_reviews",{});
+  assert.deepEqual(JSON.parse(reviews.content[0].text).reviews,[]);
 });
