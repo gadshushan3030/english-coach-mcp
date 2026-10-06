@@ -8,7 +8,7 @@ export default async function CardsPage() {
     `select w.id, w.english, w.hebrew, w.example, w.box,
             count(e.id) filter (where e.result = 'correct')::int as correct, count(e.id)::int as attempts
      from words w left join exercises e on e.word_id = w.id
-     where w.user_id = $1 and w.due_at <= now()
+     where w.user_id = $1 and w.archived_at is null and w.due_at <= now()
      group by w.id order by w.due_at limit 20`,
     [userId],
   );

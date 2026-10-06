@@ -8,12 +8,12 @@ const TABS: { href: string; label: string; icon: IconName }[] = [
   { href: "/", label: "בית", icon: "home" },
   { href: "/cards", label: "כרטיסיות", icon: "cards" },
   { href: "/words", label: "מילים", icon: "list" },
-  { href: "/talk", label: "שיחה", icon: "chat" },
+  { href: "/practice", label: "תרגול", icon: "chat" },
   { href: "/progress", label: "התקדמות", icon: "chart" },
 ];
 
 // Focused screens (a review round, a conversation, one session) hide the bar and show a back button.
-const FOCUSED = /^\/(cards|talk|progress\/.+)/;
+const FOCUSED = /^\/(cards|talk|practice|progress\/.+)/;
 
 export function TabBar() {
   const path = usePathname();

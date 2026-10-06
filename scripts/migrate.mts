@@ -11,22 +11,36 @@ if (process.env.VERCEL_GIT_COMMIT_REF === "codex/conversation-practice-questions
 }
 
 const client = new pg.Client({ connectionString: process.env.DATABASE_URL_UNPOOLED || process.env.DATABASE_URL });
-await client.connect();
-await client.query("create table if not exists schema_migrations (name text primary key, applied_at timestamptz not null default now())");
-const done = new Set((await client.query("select name from schema_migrations")).rows.map((r) => r.name));
+// Stable application key. A session lock spans every per-file transaction and
+// makes concurrent deployments read migration history only after the prior run.
+const migrationLock = [0x45434d43, 1];
+let locked = false;
+try {
+  await client.connect();
+  await client.query("select pg_advisory_lock($1::integer, $2::integer)", migrationLock);
+  locked = true;
+  await client.query("create table if not exists schema_migrations (name text primary key, applied_at timestamptz not null default now())");
+  const done = new Set((await client.query("select name from schema_migrations")).rows.map((r) => r.name));
 
-const dir = new URL("../db/migrations/", import.meta.url);
-for (const name of (await readdir(dir)).filter((f) => f.endsWith(".sql")).sort()) {
-  if (done.has(name)) continue;
-  await client.query("begin");
+  const dir = new URL("../db/migrations/", import.meta.url);
+  for (const name of (await readdir(dir)).filter((f) => f.endsWith(".sql")).sort()) {
+    if (done.has(name)) continue;
+    await client.query("begin");
+    try {
+      await client.query(await readFile(new URL(name, dir), "utf8"));
+      await client.query("insert into schema_migrations (name) values ($1)", [name]);
+      await client.query("commit");
+      console.log("applied", name);
+    } catch (error) {
+      await client.query("rollback");
+      throw error;
+    }
+  }
+} finally {
   try {
-    await client.query(await readFile(new URL(name, dir), "utf8"));
-    await client.query("insert into schema_migrations (name) values ($1)", [name]);
-    await client.query("commit");
-    console.log("applied", name);
-  } catch (error) {
-    await client.query("rollback");
-    throw error;
+    if (locked) await client.query("select pg_advisory_unlock($1::integer, $2::integer)", migrationLock);
+  } finally {
+    // Closing the session also releases the lock if explicit unlock failed.
+    await client.end();
   }
 }
-await client.end();

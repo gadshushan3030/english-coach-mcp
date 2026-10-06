@@ -11,10 +11,14 @@ export function PersonalizedQuiz({
   initialQuestions,
   dailyId,
   dailyConversation,
+  onComplete,
+  embedded = false,
 }: {
   initialQuestions: PendingQuestion[];
   dailyId: string;
   dailyConversation: ReactNode;
+  onComplete?: () => void;
+  embedded?: boolean;
 }) {
   // Keep this run stable when a saved answer revalidates the server page.
   // A reload starts a new snapshot containing only the questions still pending.
@@ -83,7 +87,7 @@ export function PersonalizedQuiz({
 
   return (
     <section data-focus className="flex flex-col gap-3.5">
-      <TopBar title="תרגול אישי" end={`${Math.min(index + 1, questions.length)}/${questions.length}`} />
+      {!embedded && <TopBar title="תרגול אישי" end={`${Math.min(index + 1, questions.length)}/${questions.length}`} />}
       <header className="flex flex-col gap-1">
         <h1 className="text-[22px] font-bold">מהשיחות שלך</h1>
         <p className="muted text-[13px]">בחירה מתוך 3 · זיהוי תשובה</p>
@@ -166,12 +170,15 @@ export function PersonalizedQuiz({
           <p className="text-3xl font-bold tabular-nums">{correct}/{results.length}</p>
           <p className="muted text-sm">תשובות נכונות בזיהוי · כל הבחירות נשמרו בהתקדמות</p>
           <p className="muted text-sm">אפשר לבדוק אם ממתינות שאלות נוספות. המאמן יוכל להוסיף שאלות גם מהשיחות הבאות שלכם.</p>
-          <button type="button" className="btn" onClick={() => window.location.reload()}>בדיקת שאלות נוספות</button>
-          <Link href="/progress" className="btn btn-ghost">להתקדמות</Link>
+          {onComplete ? <button type="button" className="btn" onClick={onComplete}>להמשך התרגול</button> : <>
+            <button type="button" className="btn" onClick={() => window.location.reload()}>בדיקת שאלות נוספות</button>
+            <Link href="/practice?section=reviews" className="btn btn-ghost">לחזרות על הטעויות שלי</Link>
+            <Link href="/progress" className="btn btn-ghost">להתקדמות</Link>
+          </>}
         </div>
       )}
 
-      <Link href={`/talk?d=${dailyId}`} className="btn btn-ghost">מעבר לשיחה היומית</Link>
+      {!embedded && <Link href={`/talk?d=${dailyId}`} className="btn btn-ghost">מעבר לשיחה היומית</Link>}
       {question && <p className="muted text-center text-xs">כל בחירה נשמרת לפני שממשיכים. בחזרה לתרגול יופיעו השאלות שעוד לא נענו.</p>}
     </section>
   );

@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { DIALOGUES, dialogueForDay } from "@/lib/content";
+import { chooseAdaptiveDialogue, resolveDialogue, nextAdaptiveDialogue } from "@/lib/adaptive-content";
+import { readLearnerProfile } from "@/lib/profile-store";
 import { sql, today } from "@/lib/db";
 import { listPendingQuestions } from "@/lib/question-store";
 import { requireUser } from "@/lib/session";
@@ -9,11 +10,11 @@ import { PersonalizedQuiz } from "./PersonalizedQuiz";
 export default async function TalkPage({ searchParams }: PageProps<"/talk">) {
   const { d } = await searchParams;
   const day = today();
-  const selectedDialogue = DIALOGUES.find((x) => x.id === d);
-  const dialogue = selectedDialogue ?? dialogueForDay(day);
-  const next = DIALOGUES[(DIALOGUES.indexOf(dialogue) + 1) % DIALOGUES.length];
-
   const userId = await requireUser();
+  const { profile } = await readLearnerProfile(userId);
+  const selectedDialogue = typeof d === "string" ? resolveDialogue(d) : undefined;
+  const dialogue = selectedDialogue ?? chooseAdaptiveDialogue(day,profile);
+  const next = nextAdaptiveDialogue(dialogue.id,profile);
   const [questions, [done]] = await Promise.all([
     listPendingQuestions(userId),
     sql<{ correct: number; total: number }>(
@@ -26,7 +27,7 @@ export default async function TalkPage({ searchParams }: PageProps<"/talk">) {
   ]);
 
   const conversation = (
-    <Conversation key={dialogue.id} dialogue={dialogue} nextId={next.id} shift={Number(day.replaceAll("-", ""))} doneToday={done ?? null} />
+    <Conversation key={`${userId}:${day}:${dialogue.id}`} dialogue={dialogue} nextId={next.id} shift={Number(day.replaceAll("-", ""))} doneToday={done ?? null} learnerId={userId} learnerKey={`${userId}:${day}`} />
   );
 
   if (selectedDialogue) {

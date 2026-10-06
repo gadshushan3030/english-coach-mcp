@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
-import { DIALOGUES, STARTER_WORDS } from "@/lib/content";
+import { STARTER_WORDS } from "@/lib/content";
+import { persistConversation } from "@/lib/conversation-store";
 import { sql } from "@/lib/db";
 import { requireUser } from "@/lib/session";
 import { answerQuestion } from "@/lib/question-store";
@@ -14,9 +15,10 @@ export async function logout() {
   redirect("/login");
 }
 
-export async function reviewWord(wordId: string, knew: boolean) {
+export async function reviewWord(wordId: string, knew: boolean, requestId: string) {
   const userId = await requireUser();
-  await sql("select review_word($1, $2, $3)", [userId, wordId, knew === true]).catch(() => {
+  if (!/^[\w-]{8,100}$/.test(requestId)) throw new Error("נתונים לא תקינים");
+  await sql("select review_word_once($1, $2, $3, $4)", [userId, wordId, knew === true, requestId]).catch(() => {
     throw new Error("השמירה נכשלה");
   });
 }
@@ -39,7 +41,7 @@ export async function addWord(_prev: string | null, form: FormData) {
 
 export async function deleteWord(wordId: string) {
   const userId = await requireUser();
-  await sql("delete from words where id = $1 and user_id = $2", [wordId, userId]);
+  await sql("update words set archived_at=now() where id = $1 and user_id = $2 and archived_at is null", [wordId, userId]);
   revalidatePath("/words");
 }
 
@@ -48,40 +50,22 @@ export async function addStarterWords() {
   await sql(
     `insert into words (user_id, english, hebrew, example)
      select $1, w.english, w.hebrew, w.example from jsonb_to_recordset($2) as w(english text, hebrew text, example text)
-     on conflict (user_id, english) do nothing`,
+     on conflict (user_id, english) do update set archived_at=null where words.archived_at is not null`,
     [userId, JSON.stringify(STARTER_WORDS)],
   );
   revalidatePath("/", "layout");
 }
 
 // The in-app daily dialogue is a checked practice session like any other (source "app").
-export async function saveConversation(requestId: string, dialogueId: string, picks: number[]) {
+export async function saveConversation(requestId: string, dialogueId: string, picks: number[], expectedUserId: string) {
   const userId = await requireUser();
-  const dialogue = DIALOGUES.find((d) => d.id === dialogueId);
-  if (!dialogue || !Array.isArray(picks) || picks.length !== dialogue.turns.length ||
-      !picks.every((pick) => Number.isInteger(pick) && pick >= 0 && pick < 3) || !/^[\w-]{8,64}$/.test(requestId)) throw new Error("נתונים לא תקינים");
+  if (expectedUserId !== userId) throw new Error("החשבון השתנה. יש לרענן את התרגול לפני שמירה");
 
   try {
-    const [{ id }] = await sql<{ id: string }>("select start_practice($1, $2, $3, 'A1', 'text', 'app') as id", [
-      userId,
-      `app:${requestId}`,
-      dialogue.title,
-    ]);
-    await sql("select finish_practice(p_user_id => $1, p_session_id => $2, p_sentences => $3, p_exercises => $4, p_checked_by => 'app')", [
-      userId,
-      id,
-      JSON.stringify(dialogue.turns.map((t) => ({ en: t.options[t.answer], he: t.answerHe }))),
-      JSON.stringify(
-        dialogue.turns.map((t, i) => ({
-          request_id: `app:${requestId}:${i}`,
-          response_format: "multiple_choice",
-          question: t.they,
-          answer: t.options[picks[i]] ?? "",
-          expected: t.options[t.answer],
-          result: picks[i] === t.answer ? "correct" : "incorrect",
-        })),
-      ),
-    ]);
+    const result = await persistConversation(userId, expectedUserId, requestId, dialogueId, picks);
+    revalidatePath("/progress");
+    revalidatePath("/");
+    return result;
   } catch {
     throw new Error("השמירה נכשלה");
   }

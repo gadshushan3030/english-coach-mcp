@@ -1,7 +1,11 @@
 import Link from "next/link";
 import { addStarterWords, logout } from "@/app/actions";
 import { Icon } from "@/components/Icon";
-import { BOX_DAYS, dialogueForDay } from "@/lib/content";
+import { BOX_DAYS } from "@/lib/content";
+import { chooseAdaptiveDialogue } from "@/lib/adaptive-content";
+import { readLearnerProfile } from "@/lib/profile-store";
+import { getReviewSummary } from "@/lib/learning-store";
+import { GOALS } from "@/lib/learner-profile";
 import { sql, today } from "@/lib/db";
 import { requireUser } from "@/lib/session";
 import { correctOf, fmtRelDay, ScoreLine, type Scores } from "./progress/ui";
@@ -11,17 +15,21 @@ type Coach = Scores & { id: string; topic: string; level: string; mode: string; 
 export default async function Home() {
   const userId = await requireUser();
   const day = today();
-  const dialogue = dialogueForDay(day);
+  const [{ profile, configured }, reviewSummary, [personal]] = await Promise.all([
+    readLearnerProfile(userId), getReviewSummary(userId),
+    sql<{pending:number}>("select count(*)::int as pending from practice_questions where user_id=$1 and answered_at is null",[userId]),
+  ]);
+  const dialogue = chooseAdaptiveDialogue(day,profile);
   const [[counts], boxes, [talk], [coach], [user]] = await Promise.all([
     sql<{ total: number; due: number; tomorrow: number }>(
       `select count(*)::int as total,
               count(*) filter (where due_at <= now())::int as due,
               count(*) filter (where (due_at at time zone 'Asia/Jerusalem')::date
                                      = (now() at time zone 'Asia/Jerusalem')::date + 1)::int as tomorrow
-       from words where user_id = $1`,
+       from words where user_id = $1 and archived_at is null`,
       [userId],
     ),
-    sql<{ box: number; n: number }>("select box, count(*)::int as n from words where user_id = $1 group by box", [userId]),
+    sql<{ box: number; n: number }>("select box, count(*)::int as n from words where user_id = $1 and archived_at is null group by box", [userId]),
     sql(
       `select 1 from practice_sessions
        where user_id = $1 and day = $2 and source = 'app' and topic = $3 and completed_at is not null limit 1`,
@@ -39,11 +47,19 @@ export default async function Home() {
   ]);
 
   const header = <Header name={user?.name} />;
+  const dailyStart = <section className="flex flex-col gap-3 rounded-[22px] bg-accent p-5 text-on-accent">
+    <span className="text-sm text-on-accent/80">{GOALS[profile.goal]} · {profile.level} · כ־{profile.daily_minutes} דקות</span>
+    <h2 className="text-[24px] font-bold">התרגול שלי להיום</h2>
+    <p className="text-sm text-on-accent/90">{counts.due} מילים לחזרה · {personal.pending} שאלות אישיות · {reviewSummary.due} חזרות על תיקונים</p>
+    <Link href="/practice" className="flex min-h-13 items-center justify-center gap-2 rounded-[14px] bg-surface px-3 font-semibold text-accent">{talk && !counts.due && !personal.pending && !reviewSummary.due ? "למסלול היומי שהושלם" : "מתחילים את המסלול היומי"}<Icon name="forward" size={20} /></Link>
+    <Link href="/settings" className="self-start text-sm underline underline-offset-4">{configured ? "עדכון מטרה, רמה וזמן" : "התאמה אישית ואבחון קצר"}</Link>
+  </section>;
 
   if (!counts.total) {
     return (
       <>
         {header}
+        {dailyStart}
         <section className="surface flex flex-col gap-4 p-6">
           <h2 className="text-xl font-bold">ברוכים הבאים</h2>
           <p className="muted">עדיין אין מילים. אפשר להתחיל עם 40 מילים בסיסיות, או להוסיף מילים משלך.</p>
@@ -64,18 +80,19 @@ export default async function Home() {
   return (
     <>
       {header}
+      {dailyStart}
 
-      <section className="flex flex-col gap-3.5 rounded-[22px] bg-accent p-5 text-on-accent">
+      <section className="surface flex flex-col gap-3.5 p-5">
         <div className="flex items-end gap-3">
           <span className="text-6xl leading-[0.9] font-semibold tracking-tight tabular-nums">{counts.due}</span>
           <div className="flex flex-col gap-0.5 pb-1">
             <span className="text-[17px] font-semibold">{counts.due ? "מילים מחכות לחזרה" : "אין חזרות כרגע"}</span>
-            {counts.tomorrow > 0 && <span className="text-[13px] text-on-accent/80">ועוד {counts.tomorrow} מחר</span>}
+            {counts.tomorrow > 0 && <span className="muted text-[13px]">ועוד {counts.tomorrow} מחר</span>}
           </div>
         </div>
         {counts.due > 0 && (
           <Link href="/cards" className="flex h-13 items-center justify-center gap-2 rounded-[14px] bg-surface font-semibold text-accent">
-            להתחיל חזרה
+            לחזרה בכרטיסיות
             <Icon name="forward" size={20} strokeWidth={2} />
           </Link>
         )}
@@ -103,7 +120,7 @@ export default async function Home() {
             <span key={b} className={b === 0 ? "text-warn" : ""}>{d}</span>
           ))}
         </div>
-        <span className="muted text-[12.5px]">ימים עד החזרה הבאה · ״יודע״ מעלה קופסה, ״צריך לתרגל״ מחזיר ל־0</span>
+        <span className="muted text-[12.5px]">מרווח החזרה לפי רמת ההיכרות, בימים · ״יודע״ מרווח את החזרות, ״צריך לתרגל״ מחזיר לחזרה היום</span>
       </section>
 
       <Link href="/talk" className="surface flex items-center gap-3.5 px-4 py-3.5">
@@ -111,10 +128,10 @@ export default async function Home() {
           <Icon name="chat" size={22} />
         </span>
         <span className="flex flex-1 flex-col gap-0.5">
-          <span className="muted text-[12.5px]">שיחה יומית</span>
+          <span className="muted text-[12.5px]">שאלות אישיות ושיחה</span>
           <span className="font-semibold">{dialogue.title}</span>
           <span className={`text-[12.5px] ${talk ? "text-accent" : "muted"}`}>
-            {talk ? "הושלמה היום" : `${dialogue.turns.length} משפטים · 2 דקות`}
+            {personal.pending > 0 ? `${personal.pending} שאלות ממתינות · ` : ""}{talk ? "השיחה הושלמה היום" : `${dialogue.turns.length} משפטים בשיחה`}
           </span>
         </span>
         <Icon name="forward" size={20} strokeWidth={2} className="text-muted" />

@@ -1,8 +1,15 @@
 import * as z from "zod/v4";
 
-export const responseFormat = z.enum(["unspecified", "multiple_choice", "free_response"]);
+export const responseFormat = z.enum(["unspecified", "multiple_choice", "gap_completion", "free_response"]);
 export const choiceIndex = z.number().int().min(0).max(2);
 const text = z.string().trim().min(1).max(500);
+const reviewVariant = z.object({
+  question: text.describe("A new contextual example testing the same grammar or vocabulary skill"),
+  choices: z.array(text).length(3).refine((choices) => new Set(choices.map((choice) => choice.toLowerCase())).size === 3, "Provide three distinct choices"),
+  correct_index: choiceIndex,
+  explanation_he: text.regex(/[\u05d0-\u05ea]/),
+  original: text.describe("An intentionally flawed practice example to rewrite; never claim the learner said this invented variant"),
+});
 export const practiceQuestionInput = z.object({
   request_id: z.string().trim().min(8).max(100),
   question: text.describe("A short English question based on an actual conversation error"),
@@ -15,6 +22,7 @@ export const practiceQuestionInput = z.object({
   original: text.describe("The learner's actual sentence, not an invented error"),
   source_session_id: z.uuid().optional().describe("The source conversation's practice_id, when available"),
   word: z.string().trim().min(1).max(100).optional().describe("Optional existing deck word; grading updates its review schedule once"),
+  review_variants: z.array(reviewVariant).max(10).optional().describe("Contextual examples for future spaced review, progressing from recognition to sentence completion and rewrite"),
 });
 export const questionAnswerInput = z.object({ question_id: z.uuid(), selected_index: choiceIndex });
 

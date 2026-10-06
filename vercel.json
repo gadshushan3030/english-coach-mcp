@@ -2,7 +2,8 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "git": {
     "deploymentEnabled": {
-      "codex/conversation-practice-questions": false
+      "codex/conversation-practice-questions": false,
+      "codex/daily-practice-release": false
     }
   }
 }

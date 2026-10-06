@@ -26,6 +26,8 @@ export function ResultBadge({ result }: { result: string }) {
 export function ResponseFormatChip({ format }: { format: string }) {
   const label = format === "multiple_choice"
     ? "זיהוי בבחירה"
+    : format === "gap_completion"
+      ? "השלמת משפט"
     : format === "free_response"
       ? "ניסוח עצמאי"
       : "סוג מענה לא תועד";

@@ -1,5 +1,118 @@
 # Conversation-derived practice questions
 
+## Daily learning improvements (2026-10-06)
+
+The current work adds `/practice` for one capped daily sequence and `/settings`
+for goals, placement and a daily time budget. The first recognition answer stays
+immutable. Migration `0004` seeds a separate scheduled skill and records each
+later review as a new checked exercise. Wrong answers return after ten minutes;
+successful recognition leads to gap completion after one day, then independent
+sentence correction after three days. Successful correction uses longer intervals
+up to thirty days. Optional `review_variants` on `queue_practice_question` introduce
+new contexts; a new context restarts recognition before typed production.
+
+Gap completion is stored as `gap_completion`, independent correction as
+`free_response`. Expected-wording grading ignores case, surrounding whitespace,
+curly apostrophes and terminal punctuation; grammatical differences remain
+distinct. Alternative valid paraphrases can fail this constrained comparison,
+which the UI explains. Invented variant examples are labelled as practice
+examples, never as actual learner mistakes. Pending payloads omit the corrected
+answer; a rewrite receives the erroneous example it must correct.
+
+Migration `0005` adds soft archive/undo and idempotent flashcard marks; `0006`
+adds user-scoped preferences and retry-safe placement evidence; `0007` suspends
+scheduling for archived words across app and MCP writes while retaining checked
+evidence. Re-adding an archived word restores its existing identity and history.
+
+The six-question placement assessment estimates A0–B1 only. Other starting levels
+can be selected manually. Authored dialogues cover A1, A2, B2 and C1 practice
+bands; the actual dialogue level is shown separately from the chosen starting
+level. Temporary microphone audio remains local, is not uploaded or assessed,
+and is discarded on continuation or refresh. Conversations retain their draft,
+selected answers and stable save request in per-user/day/dialogue session storage.
+
+Progress now preserves source links and exact explanations for later reviews.
+The delayed-vocabulary metric requires seven days since the immediately preceding
+checked attempt, excluding immediate corrections. Self-assessment remains separate.
+
+For rollout:
+
+1. Compile the final application with `npm run build` before changing the target
+   database. Rehearse the unapplied migrations, in filename order, on a branch or
+   clone of the actual production database. Migration `0005` validates historical
+   review ownership; `0007` requires the expected stored function bodies and fails
+   its transaction if they have drifted.
+2. Preserve a pre-release database snapshot and confirm the database URL used by
+   the release. The runner acquires a stable session-level PostgreSQL advisory lock
+   before reading migration history, serializing concurrent deployments on that
+   database. A preview build must use its isolated database.
+3. Apply all unapplied migrations before serving this application version.
+   `vercel-build` runs migrations before compilation, and each migration commits
+   separately. A later migration or build failure does not undo earlier commits.
+4. Verify the hosted login, MCP connection, saving, canonical retries and refresh
+   recovery before promoting the deployment. An application rollback must remain
+   compatible with archived words and new exercise formats; it does not revert
+   the database schema or its backfill.
+
+The exact review branch's auto-deployment and migration guards remain active;
+they do not protect other branches from using their configured database. Isolated
+SQL regression tests cover all seven migrations; `npm run test:ui:all` exercises
+mobile/desktop components with synthetic actions. Validation statements below
+describe their dated verification runs, not a completed hosted release.
+
+Latest release validation: 87 automated unit/schema/SQL/MCP/render and migration
+runner tests passed, as did 47 Chromium interaction tests and TypeScript/ESLint.
+An authenticated-production database backup was restored to an isolated local
+PostgreSQL instance; migrations `0004`–`0007` applied successfully to that clone,
+and a Turbopack production build completed against it without database errors.
+The production database was confirmed to contain `0001`–`0003` before release.
+The release branch disables automatic Git deployments; a production candidate
+can be built with `vercel deploy --prod --skip-domain` and verified before domain
+promotion. Such a candidate uses the production database and is not an isolated
+preview. Hosted verification and the final deployment are recorded in the release PR.
+
+Recording
+playback is covered with Chromium's real MediaRecorder and a synthetic audio
+signal: the resulting local Opus/WebM blob decodes to non-silent audio, loads in
+the native audio element, and plays with an advancing playback clock and no
+media error. Capture resources and blob URLs are released afterward. Physical
+microphone capture and Safari playback have not been verified. Mobile and
+desktop screenshots were inspected. Earlier validation compiled with Webpack
+using synthetic auth settings; startup auth discovery logged the unavailable
+local database, so that build is not an authenticated live-app verification.
+Default Turbopack compilation was blocked by this execution environment's local
+port restriction. No hosted OAuth roundtrip, staging deployment or production
+migration was performed for these improvements.
+
+## Word and sentence speech follow-up (2026-10-06)
+
+`Speak` still uses the device/browser's text-to-speech engine. Voice enumeration
+is warmed on mount and on `voiceschanged`; each tap reads the current catalogue,
+preferring a local English voice and US English among equally local choices.
+An initially empty catalogue still permits the browser's `en-US` default.
+Voice enumeration follows the browser's [getVoices/voiceschanged API](https://developer.mozilla.org/en-US/docs/Web/API/SpeechSynthesis/getVoices).
+The first speech call stays synchronous inside the tap; there are no automatic
+delayed retries that could lose the browser's required user activation.
+
+One controller owns the speech queue. It avoids cancelling an idle engine,
+resumes a paused engine, and ignores callbacks from superseded requests. Buttons
+show loading/playback, stop on a second tap, and expose actionable errors and
+manual retry. An eight-second startup watchdog handles engines that silently
+fail to start; a separate bounded watchdog handles a missing terminal event.
+Changing text remounts the button and releases its own request, so revisiting a
+word cannot resurrect a cancelled playback state. Unmounting an unrelated
+button cannot cancel the current word.
+
+`node scripts/test-speech.mts` exercises these controls with a deterministic
+speech-engine fixture in Chromium; it is also included in `npm run test:ui:all`.
+All eighteen speech regressions passed, including actual conversation rows and
+word-card layouts at 320 and 390 pixels. Failure captions occupy a full row so
+they remain readable on narrow screens. The complete 44-test browser suite,
+72 unit/schema/SQL/MCP/render tests, TypeScript and ESLint all passed afterward.
+These are UI/lifecycle regressions, not proof of audible output on a particular
+phone. The earlier native MediaRecorder test covers recorded-audio playback,
+which is a separate browser facility. No deployment was performed here.
+
 ## Review scope
 
 The assistant writes questions through MCP; no additional AI service is needed. `/talk`
@@ -7,10 +120,9 @@ loads the authenticated learner's unanswered questions, while scripted daily dia
 remain available. A question is three-choice recognition practice, not proof that the
 learner can independently produce the sentence.
 
-Apply migration `0003_practice_questions.sql` through the existing migration runner
-only in an explicitly approved environment. It creates a question queue and adds
-response-format metadata without relabeling historical exercises. This change has
-not been deployed or applied to the production database.
+Migration `0003_practice_questions.sql` creates a question queue and adds
+response-format metadata without relabeling historical exercises. It was verified
+in production migration history on 2026-10-06, before the daily-learning release.
 
 ## Assistant workflow
 
